@@ -78,32 +78,68 @@ class JpegDecoder():
             else:
                 self.file_header += 1
 
-
-    def start_of_frame(self):
+    def start_of_frame(self, data:bytes) -> None:
         pass
 
-    def define_huffman_table(self):
+    def define_huffman_table(self, data:bytes) -> None:
+        data_size = len(data)
+        data_header = 0
+        
+        # Get all huffman tables from the data
+        while (data_header < data_size):
+            table_destination = data[data_header]
+            data_header += 1
+
+            # Count how many codes of each length there are
+            codes_count = {
+                bit_length: count
+                for bit_length, count
+                in zip(range(1, 17), data[data_header : data_header+16])
+            }
+            data_header += 16
+
+            # Get the Huffman values (HUFFVAL)
+            huffval_dict = {}   # Dictionary that associates each code bit-length to all its respective Huffman values
+
+            for bit_length, count in codes_count.items():
+                huffval_dict.update(
+                    {bit_length: data[data_header : data_header+count]}
+                )
+                data_header += count
+            
+            # Build the Huffman tree
+            huffman_tree = {}
+
+            code = 0
+            for bit_length, values_list in huffval_dict.items():
+                code <<= 1
+                for huffval in values_list:
+                    code_string = bin(code)[2:].rjust(bit_length, "0")
+                    huffman_tree.update({code_string: huffval})
+                    code += 1
+            
+            # Add tree to the Huffman table dictionary
+            self.huffman_table.update({table_destination: huffman_tree})
+
+    def define_quantization_table(self, data:bytes) -> None:
         pass
 
-    def define_quantization_table(self):
+    def define_restart_interval(self, data:bytes) -> None:
         pass
 
-    def define_restart_interval(self):
+    def define_number_of_lines(self, data:bytes) -> None:
         pass
 
-    def define_number_of_lines(self):
+    def start_of_scan(self, data:bytes) -> None:
         pass
 
-    def start_of_scan(self):
+    def baseline_dct_scan(self, data:bytes) -> None:
         pass
 
-    def baseline_dct_scan(self):
+    def progressive_dct_scan(self, data:bytes) -> None:
         pass
 
-    def progressive_dct_scan(self):
-        pass
-
-    def end_of_image(self):
+    def end_of_image(self, data:bytes) -> None:
         self.scan_finished = True
 
 
@@ -129,4 +165,5 @@ class NotJpeg(JpegError):
 # Run script
 
 if __name__ == "__main__":
+    JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
     pass
