@@ -85,7 +85,7 @@ class JpegDecoder():
         data_size = len(data)
         data_header = 0
         
-        # Get all huffman tables from the data
+        # Get all huffman tables on the data
         while (data_header < data_size):
             table_destination = data[data_header]
             data_header += 1
@@ -122,7 +122,21 @@ class JpegDecoder():
             self.huffman_table.update({table_destination: huffman_tree})
 
     def define_quantization_table(self, data:bytes) -> None:
-        pass
+        data_size = len(data)
+        data_header = 0
+
+        # Get all quantization tables on the data
+        while (data_header < data_size):
+            table_destination = data[data_header]
+            data_header += 1
+
+            # Get the 64 values of the 8 x 8 quantization table
+            qt_values = [value for value in data[data_header : data_header+64]]
+            quantization_table = np.array(qt_values, dtype="uint8").reshape(8, 8)
+            data_header += 64
+
+            # Add the table to the quantization tables dictionary
+            self.quantization_table.update({table_destination: quantization_table})
 
     def define_restart_interval(self, data:bytes) -> None:
         pass
