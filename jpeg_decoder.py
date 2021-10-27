@@ -107,6 +107,11 @@ class JpegDecoder():
                 )
                 data_header += count
             
+            # Error checking
+            if (data_header > data_size):
+                # If we tried to read more bytes than what the data has, then something is wrong with the file
+                raise CorruptedJpeg("Failed to parse Huffman tables.")
+            
             # Build the Huffman tree
             huffman_tree = {}
 
@@ -132,7 +137,10 @@ class JpegDecoder():
 
             # Get the 64 values of the 8 x 8 quantization table
             qt_values = [value for value in data[data_header : data_header+64]]
-            quantization_table = np.array(qt_values, dtype="uint8").reshape(8, 8)
+            try:
+                quantization_table = np.array(qt_values, dtype="uint8").reshape(8, 8)
+            except ValueError:
+                raise CorruptedJpeg("Failed to parse quantization tables.")
             data_header += 64
 
             # Add the table to the quantization tables dictionary
@@ -173,6 +181,9 @@ class JpegError(Exception):
 
 class NotJpeg(JpegError):
     """File is not a JPEG image."""
+
+class CorruptedJpeg(JpegError):
+    """Failed to parse the file headers."""
 
 
 # ----------------------------------------------------------------------------
