@@ -61,6 +61,7 @@ class JpegDecoder():
             try:
                 current_byte = self.raw_file[self.file_header]
             except IndexError:
+                del self.raw_file
                 break
 
             if (current_byte == 0xFF):
@@ -251,6 +252,7 @@ class JpegDecoder():
 
     def end_of_image(self, data:bytes) -> None:
         self.scan_finished = True
+        del self.raw_file
 
 
 # ----------------------------------------------------------------------------
