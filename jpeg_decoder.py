@@ -235,10 +235,10 @@ class JpegDecoder():
             self.quantization_table.update({table_destination: quantization_table})
 
     def define_restart_interval(self, data:bytes) -> None:
-        pass
+        self.restart_interval = bytes_to_uint(data[:2])
 
     def define_number_of_lines(self, data:bytes) -> None:
-        pass
+        self.image_height = bytes_to_uint(data[:2])
 
     def start_of_scan(self, data:bytes) -> None:
         pass
