@@ -1,5 +1,5 @@
 import numpy as np
-from collections import deque
+from collections import deque, namedtuple
 
 # JPEG markers (for our supported segments)
 SOI  = bytes.fromhex("FFD8")    # Start of image
@@ -14,6 +14,9 @@ EOI  = bytes.fromhex("FFD9")    # End of image
 
 # Restart markers
 RST = tuple(bytes.fromhex(hex(marker)[2:]) for marker in range(0xFFD0, 0xFFD8))
+
+# Container for the parameters of each color component
+ColorComponent = namedtuple("ColorComponent", "name vertical_sampling horizontal_sampling quantization_table_id")
 
 class JpegDecoder():
 
@@ -79,7 +82,92 @@ class JpegDecoder():
                 self.file_header += 1
 
     def start_of_frame(self, data:bytes) -> None:
-        pass
+        data_size = len(data)
+        data_header = 0
+        
+        # Check encoding mode
+        mode = self.raw_file[self.file_header-4 : self.file_header-2]
+        if mode == SOF0:
+            self.scan_mode = "baseline_dct"
+        elif mode == SOF2:
+            self.scan_mode = "progressive_dct"
+        else:
+            raise UnsupportedJpeg("Encoding mode not supported. Only 'Baseline DCT' and 'Progressive DCT' are supported.")
+        
+        # Check sample precision
+        # (This is the number of bits used to represent each color value of a pixel)
+        precision = data[data_header]
+        if precision != 8:
+            raise UnsupportedJpeg("Unsupported color depth. Only 8-bit greyscale and 24-bit RGB are supported.")
+        data_header += 1
+        
+        # Get image dimensions
+        self.image_width = bytes_to_uint(data[data_header : data_header+2])
+        data_header += 2
+
+        if self.image_width == 0:
+            raise CorruptedJpeg("Image width cannot be zero.")
+
+        self.image_height = bytes_to_uint(data[data_header : data_header+2])
+        data_header += 2
+        """NOTE
+        If the heigth is specified as zero here, then it means that the heigth value
+        is going to be specidied on the DNL segment after the first scan.
+        This is for the case when the final heigth is unknown when the image is
+        being created, for example when a scanner is generating the image.
+        """
+
+        # Check number of color components
+        components_amount = data[data_header]
+        if components_amount not in (1, 3):
+            if components_amount == 4:
+                raise UnsupportedJpeg("CMYK color space is not supported. Only RGB and greyscale are supported.")
+            else:
+                raise UnsupportedJpeg("Unsupported color space. Only RGB and greyscale are supported.")
+        data_header += 1
+
+        # Get the color components and their parameters
+        components = (
+            "Y",    # Luminance
+            "Cb",   # Blue chrominance
+            "Cr",   # Red chrominance
+        )
+
+        try:
+            for count, component in enumerate(components, start=1):
+                
+                # Get the ID of the color component
+                my_id = data[data_header]
+                data_header += 1
+
+                # Get the horizontal and vertical sampling of the component
+                sample = data[data_header]          # This value is 8 bits long
+                horizontal_sample = sample >> 4     # Get the first 4 bits of the value
+                vertical_sample = sample & 0x0F     # Get the last 4 bits of the value
+
+                data_header += 1
+
+                # Get the quantization table for the component
+                my_quantization_table = data[data_header]
+                data_header += 1
+
+                # Group the parameters of the component
+                my_component = ColorComponent(
+                    name = component,
+                    horizontal_sampling = horizontal_sample,
+                    vertical_sampling = vertical_sample,
+                    quantization_table_id = my_quantization_table,
+                )
+
+                # Add the component parameters to the dictionary
+                self.color_component.update({my_id: my_component})
+
+                # Have we parsed all components?
+                if count == components_amount:
+                    break
+        
+        except IndexError:
+            raise CorruptedJpeg("Failed to parse the start of frame.")
 
     def define_huffman_table(self, data:bytes) -> None:
         data_size = len(data)
@@ -184,6 +272,9 @@ class NotJpeg(JpegError):
 
 class CorruptedJpeg(JpegError):
     """Failed to parse the file headers."""
+
+class UnsupportedJpeg(JpegError):
+    """JPEG image is encoded in a way that our decoder does not support."""
 
 
 # ----------------------------------------------------------------------------
