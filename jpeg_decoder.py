@@ -102,12 +102,6 @@ class JpegDecoder():
         data_header += 1
         
         # Get image dimensions
-        self.image_width = bytes_to_uint(data[data_header : data_header+2])
-        data_header += 2
-
-        if self.image_width == 0:
-            raise CorruptedJpeg("Image width cannot be zero.")
-
         self.image_height = bytes_to_uint(data[data_header : data_header+2])
         data_header += 2
         """NOTE
@@ -116,6 +110,12 @@ class JpegDecoder():
         This is for the case when the final heigth is unknown when the image is
         being created, for example when a scanner is generating the image.
         """
+
+        self.image_width = bytes_to_uint(data[data_header : data_header+2])
+        data_header += 2
+
+        if self.image_width == 0:
+            raise CorruptedJpeg("Image width cannot be zero.")
 
         # Check number of color components
         components_amount = data[data_header]
@@ -281,5 +281,5 @@ class UnsupportedJpeg(JpegError):
 # Run script
 
 if __name__ == "__main__":
-    JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
+    jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
     pass
