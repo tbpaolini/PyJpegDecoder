@@ -15,8 +15,9 @@ EOI  = bytes.fromhex("FFD9")    # End of image
 # Restart markers
 RST = tuple(bytes.fromhex(hex(marker)[2:]) for marker in range(0xFFD0, 0xFFD8))
 
-# Container for the parameters of each color component
+# Containers for the parameters of each color component
 ColorComponent = namedtuple("ColorComponent", "name vertical_sampling horizontal_sampling quantization_table_id")
+HuffmanTable = namedtuple("HuffmanTable", "dc ac")
 
 class JpegDecoder():
 
@@ -242,9 +243,44 @@ class JpegDecoder():
         self.image_height = bytes_to_uint(data[:2])
 
     def start_of_scan(self, data:bytes) -> None:
-        pass
+        data_size = len(data)
+        data_header = 0
 
-    def baseline_dct_scan(self, data:bytes) -> None:
+        # Number of color components in the scan
+        components_amount = data[data_header]
+        data_header += 1
+
+        # Get parameters of the components in the scan
+        my_huffman_tables = {}
+        for component in range(components_amount):
+            component_id = data[data_header]    # Should match the component ID's on the 'start of frame'
+            data_header += 1
+
+            # Selector for the Huffman tables
+            tables = data[data_header]
+            data_header += 1
+            dc_table =  tables >> 4             # Should match the tables ID's on the 'detect huffman table'
+            ac_table = (tables & 0x0F) | 0x10
+            """NOTE
+            The ID of the AC tables is a byte value which the first hexadecimal digit is 1.
+            Usually: 0x10 and 0x11 (16 and 17, in decimal).
+
+            On the other hand, the ID of the DC tables begin with hexadecimal digit 0.
+            Usually: 0x00 and 0x01.
+            """
+
+            # Store the parameters
+            my_huffman_tables.update({component_id: HuffmanTable(dc=dc_table, ac=ac_table)})
+
+        # Begin the scan of the entropy encoded segment
+        if self.scan_mode == "baseline_dct":
+            self.baseline_dct_scan(data, my_huffman_tables)
+        elif self.scan_mode == "progressive_dct":
+            self.progressive_dct_scan(data)
+        else:
+            raise UnsupportedJpeg("Encoding mode not supported. Only 'Baseline DCT' and 'Progressive DCT' are supported.")
+
+    def baseline_dct_scan(self, data:bytes, huffman_tables_id:dict) -> None:
         pass
 
     def progressive_dct_scan(self, data:bytes) -> None:
