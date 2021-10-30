@@ -35,7 +35,7 @@ class JpegDecoder():
 
         # Handlers for the markers
         self.handlers = {
-            SOI: None,
+            SOI: self.start_of_image,
             SOF0: self.start_of_frame,
             SOF2: self.start_of_frame,
             DHT: self.define_huffman_table,
@@ -77,11 +77,14 @@ class JpegDecoder():
                     if my_handler is not None:
                         my_data = self.raw_file[self.file_header : self.file_header+my_size]
                         my_handler(my_data)
-                    
-                    self.file_header += my_size
+                    else:
+                        self.file_header += my_size
             
             else:
                 self.file_header += 1
+
+    def start_of_image(self, data:bytes):
+        pass
 
     def start_of_frame(self, data:bytes) -> None:
         data_size = len(data)
@@ -170,6 +173,8 @@ class JpegDecoder():
         
         except IndexError:
             raise CorruptedJpeg("Failed to parse the start of frame.")
+        
+        self.file_header += data_size
 
     def define_huffman_table(self, data:bytes) -> None:
         data_size = len(data)
@@ -216,6 +221,8 @@ class JpegDecoder():
             # Add tree to the Huffman table dictionary
             self.huffman_table.update({table_destination: huffman_tree})
 
+            self.file_header += data_size
+
     def define_quantization_table(self, data:bytes) -> None:
         data_size = len(data)
         data_header = 0
@@ -235,12 +242,16 @@ class JpegDecoder():
 
             # Add the table to the quantization tables dictionary
             self.quantization_table.update({table_destination: quantization_table})
+        
+        self.file_header += data_size
 
     def define_restart_interval(self, data:bytes) -> None:
         self.restart_interval = bytes_to_uint(data[:2])
+        self.file_header += 2
 
     def define_number_of_lines(self, data:bytes) -> None:
         self.image_height = bytes_to_uint(data[:2])
+        self.file_header += 2
 
     def start_of_scan(self, data:bytes) -> None:
         data_size = len(data)
@@ -271,6 +282,9 @@ class JpegDecoder():
 
             # Store the parameters
             my_huffman_tables.update({component_id: HuffmanTable(dc=dc_table, ac=ac_table)})
+        
+        # Move the file header to the begining of the entropy encoded segment
+        self.file_header += data_size
 
         # Begin the scan of the entropy encoded segment
         if self.scan_mode == "baseline_dct":
