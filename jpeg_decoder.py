@@ -1,5 +1,6 @@
 import numpy as np
 from collections import deque, namedtuple
+from typing import Callable
 
 # JPEG markers (for our supported segments)
 SOI  = bytes.fromhex("FFD8")    # Start of image
@@ -35,12 +36,11 @@ class JpegDecoder():
 
         # Handlers for the markers
         self.handlers = {
-            SOI: self.start_of_image,
-            SOF0: self.start_of_frame,
-            SOF2: self.start_of_frame,
             DHT: self.define_huffman_table,
             DQT: self.define_quantization_table,
             DRI: self.define_restart_interval,
+            SOF0: self.start_of_frame,
+            SOF2: self.start_of_frame,
             SOS: self.start_of_scan,
             DNL: self.define_number_of_lines,
             EOI: self.end_of_image,
@@ -82,9 +82,6 @@ class JpegDecoder():
             
             else:
                 self.file_header += 1
-
-    def start_of_image(self, data:bytes):
-        pass
 
     def start_of_frame(self, data:bytes) -> None:
         data_size = len(data)
@@ -293,6 +290,43 @@ class JpegDecoder():
             self.progressive_dct_scan(data)
         else:
             raise UnsupportedJpeg("Encoding mode not supported. Only 'Baseline DCT' and 'Progressive DCT' are supported.")
+    
+    def bits_generator(self) -> Callable[[int, bool], str]:
+        """Returns a function that fetches the bits values in order from the raw file.
+        """
+        bit_queue = deque()
+
+        # This nested function "remembers" the contents of bit_queue between different calls        
+        def get_bits(amount:int=1, restart:bool=False) -> str:
+            """Fetches a certain amount of bits from the raw file, and moves the file header
+            when a new byte is reached.
+            """
+            nonlocal bit_queue
+            
+            # Should be set to 'True' when the restart interval is reached
+            if restart:
+                bit_queue.clear()       # Discard the remaining bits
+                self.file_header += 2   # Jump over the restart marker
+            
+            # Fetch more bits if the queue has less than the requested amount
+            while amount > len(bit_queue):
+                next_byte = self.raw_file[self.file_header]
+                self.file_header += 1
+                
+                if next_byte == 0xFF:
+                    self.file_header += 1        # Jump over the stuffed byte
+                
+                bit_queue.extend(
+                    np.unpackbits(
+                        bytearray((next_byte,))  # Unpack the bits and add them to the end of the queue
+                    )
+                )
+            
+            # Return the bits sequence as a string
+            return "".join(bit_queue.popleft() for bit in range(amount))
+        
+        # Return the nested function
+        return get_bits
 
     def baseline_dct_scan(self, data:bytes, huffman_tables_id:dict) -> None:
         pass
