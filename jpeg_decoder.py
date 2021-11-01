@@ -3,6 +3,7 @@ from collections import deque, namedtuple
 from typing import Callable
 
 from numpy.core.records import array
+from numpy.core.shape_base import block
 
 # JPEG markers (for our supported segments)
 SOI  = bytes.fromhex("FFD8")    # Start of image
@@ -340,35 +341,99 @@ class JpegDecoder():
         The file header is should be at the beginning of said segment, and at
         the after the decoding the header will be at the end of the segment.
         """
+        # Function to read the bits from the file's bytes
         next_bits = self.bits_generator()
 
+        # Function to decode the next Huffman value
+        def next_huffval() -> int:
+            codeword = ""
+            huffman_value = None
+
+            while huffman_value is None:
+                codeword += next_bits()
+                if len(codeword) > 16:
+                    raise CorruptedJpeg(f"Failed to decode image ({current_mcu}/{mcu_count} MCU's decoded).")
+                huffman_value = huffman_table.get(codeword)
+            
+            return huffman_value
+
+        # Dimensions of the MCU (minimum coding unit)
         mcu_width:int = 8 * max(component.horizontal_sampling for component in self.color_components.values())
         mcu_height:int = 8 * max(component.vertical_sampling for component in self.color_components.values())
 
+        # Amount of MCU's in the whole image
         mcu_count_h = (self.image_width // mcu_width) + (0 if self.image_width % mcu_width == 0 else 1)
         mcu_count_v = (self.image_height // mcu_height) + (0 if self.image_height % mcu_height == 0 else 1)
         mcu_count = mcu_count_h * mcu_count_v
 
+        # 3-dimensional array to store the color values of each pixel on the image
+        # array(x-coordinate, y-coordinate, RBG-color)
         array_width = mcu_width * mcu_count_h
         array_height = mcu_height * mcu_count_v
         array_depth = len(self.color_components)
         self.image_array = np.zeros(shape=(array_width, array_height, array_depth), dtype="uint8")
 
+        # Decode all the MCU's in the entropy encoded data
         current_mcu = 0
         previous_dc = 0
         while (current_mcu < mcu_count):
-            for id, component in self.color_components.items():
-                # DC value
-                huffman_table:dict = self.huffman_tables[id]
-                codeword = ""
-                value = None
-
-                while value is None:
-                    codeword += next_bits()
-                    value = huffman_table.get(codeword)
+            # Block of 8 x 8 pixels
+            block = np.zeros(64, dtype="int16")
+            mcu = np.zeros(shape=(mcu_width, mcu_height), dtype="int16")
+            
+            # Loop through all color components
+            for component_id, component in self.color_components.items():
                 
-                dc_value = bin_twos_complement(next_bits(value)) + previous_dc
+                # DC value of the block
+                table_id = huffman_tables_id[component_id].dc
+                huffman_table:dict = self.huffman_tables[table_id]
+                huffman_value = next_huffval()
+                """NOTE
+                For the DC values decoding, the huffman_value represents the bit-length
+                of the next DC value.
+                """
+                
+                dc_value = bin_twos_complement(next_bits(huffman_value)) + previous_dc
                 previous_dc = dc_value
+                block[0] = dc_value
+
+                # AC values of the block
+                table_id = huffman_tables_id[component_id].ac
+                huffman_table:dict = self.huffman_tables[table_id]
+                index = 1
+                while index < 64:
+                    huffman_value = next_huffval()
+                    """NOTE
+                    The huffman_value is one byte long. For the AC value decoding, the eight bits
+                    of the huffman value are in the following format:
+                        RRRRSSSS
+                    Where:
+                        RRRR represents the amount of zeroes before the next non-zero AC value
+                        SSSS represents the bit-length of the next AC value
+                    
+                    A huffman_value of 0x00, however, has a different meaning: it marks the end of
+                    the block (all remaining AC values of the block are zero).
+                    """
+                    
+                    # A huffman_value of 0 means the 'end of block' (all remaining AC values are zero)
+                    if huffman_value == 0x00:
+                        break
+                    
+                    # Amount of zeroes before the next AC value
+                    zero_run_length = huffman_value >> 4
+                    index += zero_run_length
+                    if index >= 64:
+                        break
+
+                    # Get the AC value
+                    ac_bit_length = huffman_value & 0x0F
+                    
+                    if ac_bit_length > 0:
+                        ac_value = bin_twos_complement(next_bits(huffman_value))
+                        block[index] = ac_value
+                    
+                    # Go to the next AC value
+                    index += 1
 
     def progressive_dct_scan(self, data:bytes) -> None:
         pass
