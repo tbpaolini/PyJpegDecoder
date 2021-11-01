@@ -2,6 +2,8 @@ import numpy as np
 from collections import deque, namedtuple
 from typing import Callable
 
+from numpy.core.records import array
+
 # JPEG markers (for our supported segments)
 SOI  = bytes.fromhex("FFD8")    # Start of image
 SOF0 = bytes.fromhex("FFC0")    # Start of frame (Baseline DCT)
@@ -42,7 +44,6 @@ class JpegDecoder():
             SOF0: self.start_of_frame,
             SOF2: self.start_of_frame,
             SOS: self.start_of_scan,
-            DNL: self.define_number_of_lines,
             EOI: self.end_of_image,
         }
 
@@ -52,9 +53,9 @@ class JpegDecoder():
         self.scan_mode = None           # Supported modes: 'baseline_dct' or 'progressive_dct'
         self.image_width = 0            # Width in pixels of the image
         self.image_height = 0           # Height in pixels of the image
-        self.color_component = {}       # Hold each color component and its respective paramenters
-        self.huffman_table = {}         # Hold all huffman tables
-        self.quantization_table = {}    # Hold all quantization tables
+        self.color_components = {}       # Hold each color component and its respective paramenters
+        self.huffman_tables = {}         # Hold all huffman tables
+        self.quantization_tables = {}    # Hold all quantization tables
         self.restart_interval = 0       # How many MCU's before each restart marker
 
         # Loop to find and process the supported file segments
@@ -162,7 +163,7 @@ class JpegDecoder():
                 )
 
                 # Add the component parameters to the dictionary
-                self.color_component.update({my_id: my_component})
+                self.color_components.update({my_id: my_component})
 
                 # Have we parsed all components?
                 if count == components_amount:
@@ -216,7 +217,7 @@ class JpegDecoder():
                     code += 1
             
             # Add tree to the Huffman table dictionary
-            self.huffman_table.update({table_destination: huffman_tree})
+            self.huffman_tables.update({table_destination: huffman_tree})
 
             self.file_header += data_size
 
@@ -238,16 +239,12 @@ class JpegDecoder():
             data_header += 64
 
             # Add the table to the quantization tables dictionary
-            self.quantization_table.update({table_destination: quantization_table})
+            self.quantization_tables.update({table_destination: quantization_table})
         
         self.file_header += data_size
 
     def define_restart_interval(self, data:bytes) -> None:
         self.restart_interval = bytes_to_uint(data[:2])
-        self.file_header += 2
-
-    def define_number_of_lines(self, data:bytes) -> None:
-        self.image_height = bytes_to_uint(data[:2])
         self.file_header += 2
 
     def start_of_scan(self, data:bytes) -> None:
@@ -283,9 +280,18 @@ class JpegDecoder():
         # Move the file header to the begining of the entropy encoded segment
         self.file_header += data_size
 
+        # Define number of lines
+        if self.image_height == 0:
+            dnl_index = self.raw_file[self.file_header:].find(DNL)
+            if dnl_index != -1:
+                dnl_index += self.file_header
+                self.image_height = bytes_to_uint(self.raw_file[dnl_index+2 : dnl_index+4])
+            else:
+                raise CorruptedJpeg("Image height cannot be zero.")
+
         # Begin the scan of the entropy encoded segment
         if self.scan_mode == "baseline_dct":
-            self.baseline_dct_scan(data, my_huffman_tables)
+            self.baseline_dct_scan(my_huffman_tables)
         elif self.scan_mode == "progressive_dct":
             self.progressive_dct_scan(data)
         else:
@@ -323,13 +329,46 @@ class JpegDecoder():
                 )
             
             # Return the bits sequence as a string
-            return "".join(bit_queue.popleft() for bit in range(amount))
+            return "".join(str(bit_queue.popleft()) for bit in range(amount))
         
         # Return the nested function
         return get_bits
 
-    def baseline_dct_scan(self, data:bytes, huffman_tables_id:dict) -> None:
-        pass
+    def baseline_dct_scan(self, huffman_tables_id:dict) -> None:
+        """Decode the image data from the entropy encoded segment.
+
+        The file header is should be at the beginning of said segment, and at
+        the after the decoding the header will be at the end of the segment.
+        """
+        next_bits = self.bits_generator()
+
+        mcu_width:int = 8 * max(component.horizontal_sampling for component in self.color_components.values())
+        mcu_height:int = 8 * max(component.vertical_sampling for component in self.color_components.values())
+
+        mcu_count_h = (self.image_width // mcu_width) + (0 if self.image_width % mcu_width == 0 else 1)
+        mcu_count_v = (self.image_height // mcu_height) + (0 if self.image_height % mcu_height == 0 else 1)
+        mcu_count = mcu_count_h * mcu_count_v
+
+        array_width = mcu_width * mcu_count_h
+        array_height = mcu_height * mcu_count_v
+        array_depth = len(self.color_components)
+        self.image_array = np.zeros(shape=(array_width, array_height, array_depth), dtype="uint8")
+
+        current_mcu = 0
+        previous_dc = 0
+        while (current_mcu < mcu_count):
+            for id, component in self.color_components.items():
+                # DC value
+                huffman_table:dict = self.huffman_tables[id]
+                codeword = ""
+                value = None
+
+                while value is None:
+                    codeword += next_bits()
+                    value = huffman_table.get(codeword)
+                
+                dc_value = bin_twos_complement(next_bits(value)) + previous_dc
+                previous_dc = dc_value
 
     def progressive_dct_scan(self, data:bytes) -> None:
         pass
@@ -344,6 +383,15 @@ class JpegDecoder():
 
 def bytes_to_uint(bytes_obj:bytes) -> int:
     return int.from_bytes(bytes_obj, byteorder="big", signed=False)
+
+def bin_twos_complement(bits:str) -> int:
+    if bits[0] == "1":
+        return int(bits, 2)
+    elif bits[0] == "0":
+        bit_length = len(bits)
+        return int(bits, 2) - (2**bit_length - 1)
+    else:
+        raise ValueError(f"'{bits}' is not a binary number.")
 
 
 # ----------------------------------------------------------------------------
