@@ -442,6 +442,12 @@ class JpegDecoder():
                         
                         # Go to the next AC value
                         index += 1
+                    
+                    # Process block...
+                    # (to do)
+            
+                # Stack and group blocks...
+                # (to do)
             
             # Go to the next MCU
             current_mcu += 1
@@ -477,6 +483,19 @@ def bin_twos_complement(bits:str) -> int:
     else:
         raise ValueError(f"'{bits}' is not a binary number.")
 
+def undo_zigzag(block:np.ndarray) -> np.ndarray:
+    return np.array(
+        [[block[0], block[1], block[5], block[6], block[14], block[15], block[27], block[28]],
+        [block[2], block[4], block[7], block[13], block[16], block[26], block[29], block[42]],
+        [block[3], block[8], block[12], block[17], block[25], block[30], block[41], block[43]],
+        [block[9], block[11], block[18], block[24], block[31], block[40], block[44], block[53]],
+        [block[10], block[19], block[23], block[32], block[39], block[45], block[52], block[54]],
+        [block[20], block[22], block[33], block[38], block[46], block[51], block[55], block[60]],
+        [block[21], block[34], block[37], block[47], block[50], block[56], block[59], block[61]],
+        [block[35], block[36], block[48], block[49], block[57], block[58], block[62], block[63]]],
+        dtype=block.dtype
+    )
+
 
 # ----------------------------------------------------------------------------
 # Decoder exceptions
@@ -501,4 +520,4 @@ class UnsupportedJpeg(JpegError):
 if __name__ == "__main__":
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
     jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg")
-    pass
+    
