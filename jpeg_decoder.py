@@ -20,7 +20,7 @@ EOI  = bytes.fromhex("FFD9")    # End of image
 RST = tuple(bytes.fromhex(hex(marker)[2:]) for marker in range(0xFFD0, 0xFFD8))
 
 # Containers for the parameters of each color component
-ColorComponent = namedtuple("ColorComponent", "name vertical_sampling horizontal_sampling quantization_table_id")
+ColorComponent = namedtuple("ColorComponent", "name vertical_sampling horizontal_sampling quantization_table_id repeat")
 HuffmanTable = namedtuple("HuffmanTable", "dc ac")
 
 class JpegDecoder():
@@ -54,9 +54,9 @@ class JpegDecoder():
         self.scan_mode = None           # Supported modes: 'baseline_dct' or 'progressive_dct'
         self.image_width = 0            # Width in pixels of the image
         self.image_height = 0           # Height in pixels of the image
-        self.color_components = {}       # Hold each color component and its respective paramenters
-        self.huffman_tables = {}         # Hold all huffman tables
-        self.quantization_tables = {}    # Hold all quantization tables
+        self.color_components = {}      # Hold each color component and its respective paramenters
+        self.huffman_tables = {}        # Hold all huffman tables
+        self.quantization_tables = {}   # Hold all quantization tables
         self.restart_interval = 0       # How many MCU's before each restart marker
 
         # Loop to find and process the supported file segments
@@ -157,10 +157,11 @@ class JpegDecoder():
 
                 # Group the parameters of the component
                 my_component = ColorComponent(
-                    name = component,
-                    horizontal_sampling = horizontal_sample,
-                    vertical_sampling = vertical_sample,
-                    quantization_table_id = my_quantization_table,
+                    name = component,                                       # Name of the color component
+                    horizontal_sampling = horizontal_sample,                # Amount of pixels sampled in the horizontal
+                    vertical_sampling = vertical_sample,                    # # Amount of pixels sampled in the vertical
+                    quantization_table_id = my_quantization_table,          # Quantization table selector
+                    repeat = horizontal_sample * vertical_sample,           # Amount of times the component repeats during decoding
                 )
 
                 # Add the component parameters to the dictionary
@@ -377,63 +378,70 @@ class JpegDecoder():
         current_mcu = 0
         previous_dc = 0
         while (current_mcu < mcu_count):
-            # Block of 8 x 8 pixels
-            block = np.zeros(64, dtype="int16")
+            
+            # Current MCU
             mcu = np.zeros(shape=(mcu_width, mcu_height), dtype="int16")
             
             # Loop through all color components
             for component_id, component in self.color_components.items():
                 
-                # DC value of the block
-                table_id = huffman_tables_id[component_id].dc
-                huffman_table:dict = self.huffman_tables[table_id]
-                huffman_value = next_huffval()
-                """NOTE
-                For the DC values decoding, the huffman_value represents the bit-length
-                of the next DC value.
-                """
-                
-                dc_value = bin_twos_complement(next_bits(huffman_value)) + previous_dc
-                previous_dc = dc_value
-                block[0] = dc_value
-
-                # AC values of the block
-                table_id = huffman_tables_id[component_id].ac
-                huffman_table:dict = self.huffman_tables[table_id]
-                index = 1
-                while index < 64:
+                for _ in range(component.repeat):
+                    # Block of 8 x 8 pixels
+                    block = np.zeros(64, dtype="int16")
+                    
+                    # DC value of the block
+                    table_id = huffman_tables_id[component_id].dc
+                    huffman_table:dict = self.huffman_tables[table_id]
                     huffman_value = next_huffval()
                     """NOTE
-                    The huffman_value is one byte long. For the AC value decoding, the eight bits
-                    of the huffman value are in the following format:
-                        RRRRSSSS
-                    Where:
-                        RRRR represents the amount of zeroes before the next non-zero AC value
-                        SSSS represents the bit-length of the next AC value
-                    
-                    A huffman_value of 0x00, however, has a different meaning: it marks the end of
-                    the block (all remaining AC values of the block are zero).
+                    For the DC values decoding, the huffman_value represents the bit-length
+                    of the next DC value.
                     """
                     
-                    # A huffman_value of 0 means the 'end of block' (all remaining AC values are zero)
-                    if huffman_value == 0x00:
-                        break
-                    
-                    # Amount of zeroes before the next AC value
-                    zero_run_length = huffman_value >> 4
-                    index += zero_run_length
-                    if index >= 64:
-                        break
+                    dc_value = bin_twos_complement(next_bits(huffman_value)) + previous_dc
+                    previous_dc = dc_value
+                    block[0] = dc_value
 
-                    # Get the AC value
-                    ac_bit_length = huffman_value & 0x0F
-                    
-                    if ac_bit_length > 0:
-                        ac_value = bin_twos_complement(next_bits(huffman_value))
-                        block[index] = ac_value
-                    
-                    # Go to the next AC value
-                    index += 1
+                    # AC values of the block
+                    table_id = huffman_tables_id[component_id].ac
+                    huffman_table:dict = self.huffman_tables[table_id]
+                    index = 1
+                    while index < 64:
+                        huffman_value = next_huffval()
+                        """NOTE
+                        The huffman_value is one byte long. For the AC value decoding, the eight bits
+                        of the huffman value are in the following format:
+                            RRRRSSSS
+                        Where:
+                            RRRR represents the amount of zeroes before the next non-zero AC value
+                            SSSS represents the bit-length of the next AC value
+                        
+                        A huffman_value of 0x00, however, has a different meaning: it marks the end of
+                        the block (all remaining AC values of the block are zero).
+                        """
+                        
+                        # A huffman_value of 0 means the 'end of block' (all remaining AC values are zero)
+                        if huffman_value == 0x00:
+                            break
+                        
+                        # Amount of zeroes before the next AC value
+                        zero_run_length = huffman_value >> 4
+                        index += zero_run_length
+                        if index >= 64:
+                            break
+
+                        # Get the AC value
+                        ac_bit_length = huffman_value & 0x0F
+                        
+                        if ac_bit_length > 0:
+                            ac_value = bin_twos_complement(next_bits(ac_bit_length))
+                            block[index] = ac_value
+                        
+                        # Go to the next AC value
+                        index += 1
+            
+            # Go to the next MCU
+            current_mcu += 1
 
     def progressive_dct_scan(self, data:bytes) -> None:
         pass
@@ -450,7 +458,9 @@ def bytes_to_uint(bytes_obj:bytes) -> int:
     return int.from_bytes(bytes_obj, byteorder="big", signed=False)
 
 def bin_twos_complement(bits:str) -> int:
-    if bits[0] == "1":
+    if bits == "":
+        return 0
+    elif bits[0] == "1":
         return int(bits, 2)
     elif bits[0] == "0":
         bit_length = len(bits)
