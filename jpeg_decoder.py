@@ -174,6 +174,7 @@ class JpegDecoder():
         except IndexError:
             raise CorruptedJpeg("Failed to parse the start of frame.")
         
+        # Move the file header to the end of the data segment
         self.file_header += data_size
 
     def define_huffman_table(self, data:bytes) -> None:
@@ -221,7 +222,8 @@ class JpegDecoder():
             # Add tree to the Huffman table dictionary
             self.huffman_tables.update({table_destination: huffman_tree})
 
-            self.file_header += data_size
+        # Move the file header to the end of the data segment
+        self.file_header += data_size
 
     def define_quantization_table(self, data:bytes) -> None:
         data_size = len(data)
@@ -243,6 +245,7 @@ class JpegDecoder():
             # Add the table to the quantization tables dictionary
             self.quantization_tables.update({table_destination: quantization_table})
         
+        # Move the file header to the end of the data segment
         self.file_header += data_size
 
     def define_restart_interval(self, data:bytes) -> None:
@@ -442,6 +445,12 @@ class JpegDecoder():
             
             # Go to the next MCU
             current_mcu += 1
+            # print(f"{current_mcu}/{mcu_count}", end="\r")
+            
+            # Check for restart interval
+            if (self.restart_interval > 0) and (current_mcu % self.restart_interval == 0):
+                next_bits(amount=0, restart=True)
+                previous_dc = 0
 
     def progressive_dct_scan(self, data:bytes) -> None:
         pass
@@ -490,5 +499,6 @@ class UnsupportedJpeg(JpegError):
 # Run script
 
 if __name__ == "__main__":
-    jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
+    # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
+    jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg")
     pass
