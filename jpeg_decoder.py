@@ -1,5 +1,6 @@
 import numpy as np
 from collections import deque, namedtuple
+from math import cos, pi
 from typing import Callable
 
 from numpy.core.records import array
@@ -448,6 +449,9 @@ class JpegDecoder():
                     
                     # Undo the zigzag scan and apply dequantization
                     block = undo_zigzag(block) * quantization_table
+
+                    # Apply the inverse discrete cosine transform (IDCT)
+                    block = idct(block)
             
                 # Stack and group blocks...
                 # (to do)
@@ -506,6 +510,42 @@ def undo_zigzag(block:np.ndarray) -> np.ndarray:
     in the 8 x 8 block of pixels: array[x, y]
     """
 
+def idct(block:np.ndarray) -> np.ndarray:
+    """Takes a 8 x 8 array of DCT coefficients, and perform the inverse discrete
+    cosine transform in order to reconstruct the color values.
+    """
+    output = np.zeros(shape=(8, 8), dtype=block.dtype)      # Array to store the results
+    block_iter = np.nditer(block, flags=['multi_index'])    # Iterator for the original array
+
+    for value in block_iter:
+        result = 0
+        
+        # Summation of the frequencies components
+        for u in range(8):
+            for v in range(8):
+                # Scaling factors
+                Cu = 2**(-0.5) if u == 0 else 1.0   # Horizontal
+                Cv = 2**(-0.5) if v == 0 else 1.0   # Vertical
+
+                # (x, y) coordinates on the block
+                x, y = block_iter.multi_index
+                
+                # Partial sum
+                result += Cu * Cv * block[u, v] * cos((2*x + 1) * pi * u / 16) * cos((2*y + 1) * pi * v / 16)
+        
+        # Add the summation result to the output
+        output[x, y] = round(result/4) + 128
+        """NOTE
+        The result is divided by 4 because on the inverse DCT transform formula
+        the whole summation is divided by 4.
+        128 is added to the result because, before the foward DCT transform, 128
+        was subtracted from the value (in order to center around zero values
+        from 0 to 255).
+        """
+    
+    # Return the color values
+    return output
+
 
 # ----------------------------------------------------------------------------
 # Decoder exceptions
@@ -528,6 +568,6 @@ class UnsupportedJpeg(JpegError):
 # Run script
 
 if __name__ == "__main__":
-    # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
-    jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg")
+    jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
+    # jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg")
     
