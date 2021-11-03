@@ -235,9 +235,9 @@ class JpegDecoder():
             data_header += 1
 
             # Get the 64 values of the 8 x 8 quantization table
-            qt_values = [value for value in data[data_header : data_header+64]]
+            qt_values = np.array([value for value in data[data_header : data_header+64]], dtype="int16")
             try:
-                quantization_table = np.array(qt_values, dtype="int16").reshape(8, 8)
+                quantization_table = undo_zigzag(qt_values)
             except ValueError:
                 raise CorruptedJpeg("Failed to parse quantization tables.")
             data_header += 64
@@ -487,6 +487,9 @@ def bin_twos_complement(bits:str) -> int:
         raise ValueError(f"'{bits}' is not a binary number.")
 
 def undo_zigzag(block:np.ndarray) -> np.ndarray:
+    """Takes an 1D array of 64 elements and undo the zig-zag scan of the JPEG
+    encoding process. Returns a 2D array (8 x 8) that represents a block of pixels.
+    """
     return np.array(
         [[block[0], block[1], block[5], block[6], block[14], block[15], block[27], block[28]],
         [block[2], block[4], block[7], block[13], block[16], block[26], block[29], block[42]],
@@ -497,7 +500,11 @@ def undo_zigzag(block:np.ndarray) -> np.ndarray:
         [block[21], block[34], block[37], block[47], block[50], block[56], block[59], block[61]],
         [block[35], block[36], block[48], block[49], block[57], block[58], block[62], block[63]]],
         dtype=block.dtype
-    )
+    ).T # <-- transposes the array
+    """NOTE
+    The array is transposed so the code above matches the (x, y) positions of the elements
+    in the 8 x 8 block of pixels: array[x, y]
+    """
 
 
 # ----------------------------------------------------------------------------
