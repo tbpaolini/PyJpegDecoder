@@ -3,9 +3,6 @@ from collections import deque, namedtuple
 from math import cos, pi
 from typing import Callable
 
-from numpy.core.records import array
-from numpy.core.shape_base import block
-
 # JPEG markers (for our supported segments)
 SOI  = bytes.fromhex("FFD8")    # Start of image
 SOF0 = bytes.fromhex("FFC0")    # Start of frame (Baseline DCT)
@@ -21,7 +18,7 @@ EOI  = bytes.fromhex("FFD9")    # End of image
 RST = tuple(bytes.fromhex(hex(marker)[2:]) for marker in range(0xFFD0, 0xFFD8))
 
 # Containers for the parameters of each color component
-ColorComponent = namedtuple("ColorComponent", "name vertical_sampling horizontal_sampling quantization_table_id repeat")
+ColorComponent = namedtuple("ColorComponent", "name vertical_sampling horizontal_sampling quantization_table_id repeat shape")
 HuffmanTable = namedtuple("HuffmanTable", "dc ac")
 
 class JpegDecoder():
@@ -163,6 +160,7 @@ class JpegDecoder():
                     vertical_sampling = vertical_sample,                    # # Amount of pixels sampled in the vertical
                     quantization_table_id = my_quantization_table,          # Quantization table selector
                     repeat = horizontal_sample * vertical_sample,           # Amount of times the component repeats during decoding
+                    shape = (8*horizontal_sample, 8*vertical_sample),       # Dimensions (in pixels) of the MCU for the component
                 )
 
                 # Add the component parameters to the dictionary
@@ -366,7 +364,7 @@ class JpegDecoder():
         mcu_width:int = 8 * max(component.horizontal_sampling for component in self.color_components.values())
         mcu_height:int = 8 * max(component.vertical_sampling for component in self.color_components.values())
 
-        # Amount of MCU's in the whole image
+        # Amount of MCU's in the whole image (horizontal, vertical, and total)
         mcu_count_h = (self.image_width // mcu_width) + (0 if self.image_width % mcu_width == 0 else 1)
         mcu_count_v = (self.image_height // mcu_height) + (0 if self.image_height % mcu_height == 0 else 1)
         mcu_count = mcu_count_h * mcu_count_v
@@ -376,23 +374,26 @@ class JpegDecoder():
         array_width = mcu_width * mcu_count_h
         array_height = mcu_height * mcu_count_v
         array_depth = len(self.color_components)
-        self.image_array = np.zeros(shape=(array_width, array_height, array_depth), dtype="uint8")
+        self.image_array = np.zeros(shape=(array_width, array_height, array_depth), dtype="int16")
 
         # Decode all the MCU's in the entropy encoded data
         current_mcu = 0
         previous_dc = 0
         while (current_mcu < mcu_count):
             
-            # Current MCU
-            mcu = np.zeros(shape=(mcu_width, mcu_height), dtype="int16")
+            # (x, y) coordinates, on the image, for the current MCU
+            mcu_y, mcu_x = divmod(current_mcu, mcu_count_h)
             
             # Loop through all color components
             for depth, (component_id, component) in enumerate(self.color_components.items()):
 
                 # Quantization table of the color component
                 quantization_table = self.quantization_tables[component.quantization_table_id]
+
+                # Minimum coding unit (MCU) of the component
+                mcu = np.zeros(shape=component.shape, dtype="int16")
                 
-                for _ in range(component.repeat):
+                for block_count in range(component.repeat):
                     # Block of 8 x 8 pixels for the color component
                     block = np.zeros(64, dtype="int16")
                     
@@ -452,9 +453,19 @@ class JpegDecoder():
 
                     # Apply the inverse discrete cosine transform (IDCT)
                     block = idct(block)
+
+                    # Coordinates of the block on the current MCU
+                    block_y, block_x = divmod(block_count, component.horizontal_sampling)
+                    block_y, block_x = 8*block_y, 8*block_x
+
+                    # Add the block to the MCU
+                    mcu[block_x : block_x+8, block_y : block_y+8] = block
             
-                # Stack and group blocks...
-                # (to do)
+                # Add the MCU to the image
+                my_width, my_heigth = mcu.shape
+                x = my_width * mcu_x
+                y = my_heigth * mcu_y
+                self.image_array[x : x+my_width, y : y+my_heigth, depth] = mcu
             
             # Go to the next MCU
             current_mcu += 1
@@ -507,7 +518,8 @@ def undo_zigzag(block:np.ndarray) -> np.ndarray:
     ).T # <-- transposes the array
     """NOTE
     The array is transposed so the code above matches the (x, y) positions of the elements
-    in the 8 x 8 block of pixels: array[x, y]
+    in the 8 x 8 block of pixels:
+    array[x, y] = value on that pixel position
     """
 
 def idct(block:np.ndarray) -> np.ndarray:
