@@ -237,7 +237,7 @@ class JpegDecoder():
             # Get the 64 values of the 8 x 8 quantization table
             qt_values = [value for value in data[data_header : data_header+64]]
             try:
-                quantization_table = np.array(qt_values, dtype="uint8").reshape(8, 8)
+                quantization_table = np.array(qt_values, dtype="int16").reshape(8, 8)
             except ValueError:
                 raise CorruptedJpeg("Failed to parse quantization tables.")
             data_header += 64
@@ -386,10 +386,13 @@ class JpegDecoder():
             mcu = np.zeros(shape=(mcu_width, mcu_height), dtype="int16")
             
             # Loop through all color components
-            for component_id, component in self.color_components.items():
+            for depth, (component_id, component) in enumerate(self.color_components.items()):
+
+                # Quantization table of the color component
+                quantization_table = self.quantization_tables[component.quantization_table_id]
                 
                 for _ in range(component.repeat):
-                    # Block of 8 x 8 pixels
+                    # Block of 8 x 8 pixels for the color component
                     block = np.zeros(64, dtype="int16")
                     
                     # DC value of the block
@@ -443,8 +446,8 @@ class JpegDecoder():
                         # Go to the next AC value
                         index += 1
                     
-                    # Process block...
-                    # (to do)
+                    # Undo the zigzag scan and apply dequantization
+                    block = undo_zigzag(block) * quantization_table
             
                 # Stack and group blocks...
                 # (to do)
