@@ -526,8 +526,9 @@ def undo_zigzag(block:np.ndarray) -> np.ndarray:
 
 # Precalculate the constant values used on the idct() function
 idct_table = np.zeros(shape=(8,8,8,8), dtype="float64")
-idct_coordinates = tuple(product(range(8), repeat=4))
-for x, y, u, v in idct_coordinates:
+xyuv_coordinates = tuple(product(range(8), repeat=4))
+xy_coordinates = tuple(product(range(8), repeat=2))
+for x, y, u, v in xyuv_coordinates:
     # Scaling factors
     Cu = 2**(-0.5) if u == 0 else 1.0   # Horizontal
     Cv = 2**(-0.5) if v == 0 else 1.0   # Vertical 
@@ -543,8 +544,8 @@ def idct(block:np.ndarray) -> np.ndarray:
     output = np.zeros(shape=(8, 8), dtype="float64")
 
     # Summation of the frequecies components
-    for x, y, u, v in idct_coordinates:
-        output[x, y] += block[u, v] * idct_table[x, y, u, v]
+    for x, y in xy_coordinates:
+        output[x, y] = np.sum(block * idct_table[x, y, ...], dtype="float64")
     
     # Return the color values
     return np.round(output).astype(block.dtype) + 128
