@@ -378,6 +378,9 @@ class JpegDecoder():
         array_depth = len(self.color_components)
         self.image_array = np.zeros(shape=(array_width, array_height, array_depth), dtype="int16")
 
+        # Function to perform the inverse discrete cosine transform (IDCT)
+        idct = InverseDCT()
+
         # Decode all the MCU's in the entropy encoded data
         current_mcu = 0
         previous_dc = 0
@@ -486,6 +489,39 @@ class JpegDecoder():
         del self.raw_file
 
 
+class InverseDCT():
+    # Precalculate the constant values used on the IDCT function
+    idct_table = np.zeros(shape=(8,8,8,8), dtype="float64")
+    xyuv_coordinates = tuple(product(range(8), repeat=4))
+    xy_coordinates = tuple(product(range(8), repeat=2))
+    for x, y, u, v in xyuv_coordinates:
+        # Scaling factors
+        Cu = 2**(-0.5) if u == 0 else 1.0   # Horizontal
+        Cv = 2**(-0.5) if v == 0 else 1.0   # Vertical 
+
+        # Frequency component
+        idct_table[x, y, u, v] = 0.25 * Cu * Cv * cos((2*x + 1) * pi * u / 16) * cos((2*y + 1) * pi * v / 16)
+
+    def __call__(self, block:np.ndarray) -> np.ndarray:
+        """Takes a 8 x 8 array of DCT coefficients, and performs the inverse discrete
+        cosine transform in order to reconstruct the color values.
+        """
+        # Array to store the results
+        output = np.zeros(shape=(8, 8), dtype="float64")
+
+        # Summation of the frequecies components
+        for x, y in self.xy_coordinates:
+            output[x, y] = np.sum(block * self.idct_table[x, y, ...], dtype="float64")
+        
+        # Return the color values
+        return np.round(output).astype(block.dtype) + 128
+        """NOTE
+        128 is added to the result because, before the foward DCT transform, 128
+        was subtracted from the value (in order to center around zero values
+        from 0 to 255).
+        """
+
+
 # ----------------------------------------------------------------------------
 # Helper functions
 
@@ -523,38 +559,6 @@ def undo_zigzag(block:np.ndarray) -> np.ndarray:
     in the 8 x 8 block of pixels:
     array[x, y] = value on that pixel position
     """
-
-# Precalculate the constant values used on the idct() function
-idct_table = np.zeros(shape=(8,8,8,8), dtype="float64")
-xyuv_coordinates = tuple(product(range(8), repeat=4))
-xy_coordinates = tuple(product(range(8), repeat=2))
-for x, y, u, v in xyuv_coordinates:
-    # Scaling factors
-    Cu = 2**(-0.5) if u == 0 else 1.0   # Horizontal
-    Cv = 2**(-0.5) if v == 0 else 1.0   # Vertical 
-
-    # Frequency component
-    idct_table[x, y, u, v] = 0.25 * Cu * Cv * cos((2*x + 1) * pi * u / 16) * cos((2*y + 1) * pi * v / 16)
-
-def idct(block:np.ndarray) -> np.ndarray:
-    """Takes a 8 x 8 array of DCT coefficients, and performs the inverse discrete
-    cosine transform in order to reconstruct the color values.
-    """
-    # Array to store the results
-    output = np.zeros(shape=(8, 8), dtype="float64")
-
-    # Summation of the frequecies components
-    for x, y in xy_coordinates:
-        output[x, y] = np.sum(block * idct_table[x, y, ...], dtype="float64")
-    
-    # Return the color values
-    return np.round(output).astype(block.dtype) + 128
-    """NOTE
-    128 is added to the result because, before the foward DCT transform, 128
-    was subtracted from the value (in order to center around zero values
-    from 0 to 255).
-    """
-
 
 # ----------------------------------------------------------------------------
 # Decoder exceptions
