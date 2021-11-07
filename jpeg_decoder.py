@@ -388,7 +388,7 @@ class JpegDecoder():
 
         # Decode all the MCU's in the entropy encoded data
         current_mcu = 0
-        previous_dc = np.zeros(array_depth)
+        previous_dc = np.zeros(array_depth, dtype="int16")
         while (current_mcu < mcu_count):
             
             # (x, y) coordinates, on the image, for the current MCU
@@ -490,7 +490,7 @@ class JpegDecoder():
             # Check for restart interval
             if (self.restart_interval > 0) and (current_mcu % self.restart_interval == 0):
                 next_bits(amount=0, restart=True)
-                previous_dc = 0
+                previous_dc[:] = 0
         
         # Convert image from YCbCr to RGB
         if (array_depth == 3):
@@ -647,6 +647,6 @@ class UnsupportedJpeg(JpegError):
 # Run script
 
 if __name__ == "__main__":
-    jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
-    # jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg"
+    # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
+    # jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg")
     pass
