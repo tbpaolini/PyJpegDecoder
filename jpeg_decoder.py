@@ -110,9 +110,9 @@ class JpegDecoder():
         self.image_height = bytes_to_uint(data[data_header : data_header+2])
         data_header += 2
         """NOTE
-        If the heigth is specified as zero here, then it means that the heigth value
+        If the height is specified as zero here, then it means that the height value
         is going to be specidied on the DNL segment after the first scan.
-        This is for the case when the final heigth is unknown when the image is
+        This is for the case when the final height is unknown when the image is
         being created, for example when a scanner is generating the image.
         """
 
@@ -366,6 +366,7 @@ class JpegDecoder():
         # Dimensions of the MCU (minimum coding unit)
         mcu_width:int = 8 * max(component.horizontal_sampling for component in self.color_components.values())
         mcu_height:int = 8 * max(component.vertical_sampling for component in self.color_components.values())
+        mcu_shape = (mcu_width, mcu_height)
 
         # Amount of MCU's in the whole image (horizontal, vertical, and total)
         mcu_count_h = (self.image_width // mcu_width) + (0 if self.image_width % mcu_width == 0 else 1)
@@ -382,6 +383,9 @@ class JpegDecoder():
         # Function to perform the inverse discrete cosine transform (IDCT)
         idct = InverseDCT()
 
+        # Function to resize a block of color values
+        resize = ResizeGrid()
+
         # Decode all the MCU's in the entropy encoded data
         current_mcu = 0
         previous_dc = 0
@@ -397,7 +401,7 @@ class JpegDecoder():
                 quantization_table = self.quantization_tables[component.quantization_table_id]
 
                 # Minimum coding unit (MCU) of the component
-                mcu = np.zeros(shape=component.shape, dtype="int16")
+                my_mcu = np.zeros(shape=component.shape, dtype="int16")
                 
                 for block_count in range(component.repeat):
                     # Block of 8 x 8 pixels for the color component
@@ -465,13 +469,19 @@ class JpegDecoder():
                     block_y, block_x = 8*block_y, 8*block_x
 
                     # Add the block to the MCU
-                    mcu[block_x : block_x+8, block_y : block_y+8] = block
+                    my_mcu[block_x : block_x+8, block_y : block_y+8] = block
             
+                # Upsample the block if necessary
+                if my_mcu.shape != mcu_shape:
+                    my_mcu = resize(my_mcu, mcu_shape)
+                """NOTE
+                Linear interpolation is performed on subsampled color components.
+                """
+                
                 # Add the MCU to the image
-                my_width, my_heigth = mcu.shape
-                x = my_width * mcu_x
-                y = my_heigth * mcu_y
-                self.image_array[x : x+my_width, y : y+my_heigth, depth] = mcu
+                x = mcu_width * mcu_x
+                y = mcu_height * mcu_y
+                self.image_array[x : x+mcu_width, y : y+mcu_height, depth] = my_mcu
             
             # Go to the next MCU
             current_mcu += 1
@@ -530,16 +540,16 @@ class ResizeGrid():
         """Takes a 2-dimensional array and resizes it while performing
         linear interpolation between the points.
         """
-        old_width, old_heigth = block.shape
-        new_width, new_heigth = new_shape
-        key = ((old_width, old_heigth), (new_width, new_heigth))
+        old_width, old_height = block.shape
+        new_width, new_height = new_shape
+        key = ((old_width, old_height), (new_width, new_height))
 
         new_xy = self.mesh_cache.get(key)
         if new_xy is None:
             max_x = old_width - 1
-            max_y = old_heigth - 1
+            max_y = old_height - 1
             num_points_x = new_width * 1j
-            num_points_y = new_heigth * 1j
+            num_points_y = new_height * 1j
             new_x, new_y = np.mgrid[0 : max_x : num_points_x, 0 : max_y : num_points_y]
             new_xy = (new_x, new_y)
             self.mesh_cache.update({key: new_xy})
@@ -615,6 +625,6 @@ class UnsupportedJpeg(JpegError):
 # Run script
 
 if __name__ == "__main__":
-    # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
+    jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg"
     pass
