@@ -1,4 +1,5 @@
-__pycache__\
-**\*.jpg
-**\*.jpeg
-**\*.jfif
+__pycache__/
+**/*.jpg
+**/*.jpeg
+**/*.jfif
+tests/
