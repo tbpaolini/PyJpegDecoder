@@ -291,7 +291,7 @@ class JpegDecoder():
             dnl_index = self.raw_file[self.file_header:].find(DNL)
             if dnl_index != -1:
                 dnl_index += self.file_header
-                self.image_height = bytes_to_uint(self.raw_file[dnl_index+2 : dnl_index+4])
+                self.image_height = bytes_to_uint(self.raw_file[dnl_index+4 : dnl_index+6])
             else:
                 raise CorruptedJpeg("Image height cannot be zero.")
 
