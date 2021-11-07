@@ -2,8 +2,9 @@ import numpy as np
 from collections import deque, namedtuple
 from itertools import product
 from math import cos, pi
-from typing import Callable
-from time import perf_counter
+from numpy.core.numeric import indices
+from scipy.interpolate import griddata
+from typing import Callable, Tuple
 
 # JPEG markers (for our supported segments)
 SOI  = bytes.fromhex("FFD8")    # Start of image
@@ -521,6 +522,39 @@ class InverseDCT():
         from 0 to 255).
         """
 
+class ResizeGrid():
+    mesh_cache = {}
+    indices_cache = {}
+
+    def __call__(self, block:np.ndarray, new_shape:Tuple[int,int]) -> np.ndarray:
+        """Takes a 2-dimensional array and resizes it while performing
+        linear interpolation between the points.
+        """
+        old_width, old_heigth = block.shape
+        new_width, new_heigth = new_shape
+        key = ((old_width, old_heigth), (new_width, new_heigth))
+
+        new_xy = self.mesh_cache.get(key)
+        if new_xy is None:
+            max_x = old_width - 1
+            max_y = old_heigth - 1
+            num_points_x = new_width * 1j
+            num_points_y = new_heigth * 1j
+            new_x, new_y = np.mgrid[0 : max_x : num_points_x, 0 : max_y : num_points_y]
+            new_xy = (new_x, new_y)
+            self.mesh_cache.update({key: new_xy})
+        
+        old_xy = self.indices_cache.get(key[0])
+        if old_xy is None:
+            xx, yy = np.indices(block.shape)
+            xx, yy = xx.flatten(), yy.flatten()
+            old_xy = (xx, yy)
+            self.indices_cache.update({key[0]: old_xy})
+        
+        resized_block = griddata(old_xy, block.ravel(), new_xy)
+        
+        return np.round(resized_block).astype(block.dtype)
+
 
 # ----------------------------------------------------------------------------
 # Helper functions
@@ -581,6 +615,6 @@ class UnsupportedJpeg(JpegError):
 # Run script
 
 if __name__ == "__main__":
-    jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
-    # jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg")
-    
+    # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
+    # jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg"
+    pass
