@@ -388,7 +388,7 @@ class JpegDecoder():
 
         # Decode all the MCU's in the entropy encoded data
         current_mcu = 0
-        previous_dc = 0
+        previous_dc = np.zeros(array_depth)
         while (current_mcu < mcu_count):
             
             # (x, y) coordinates, on the image, for the current MCU
@@ -416,8 +416,8 @@ class JpegDecoder():
                     of the next DC value.
                     """
                     
-                    dc_value = bin_twos_complement(next_bits(huffman_value)) + previous_dc
-                    previous_dc = dc_value
+                    dc_value = bin_twos_complement(next_bits(huffman_value)) + previous_dc[depth]
+                    previous_dc[depth] = dc_value
                     block[0] = dc_value
 
                     # AC values of the block
