@@ -491,6 +491,10 @@ class JpegDecoder():
             if (self.restart_interval > 0) and (current_mcu % self.restart_interval == 0):
                 next_bits(amount=0, restart=True)
                 previous_dc = 0
+        
+        # Convert image from YCbCr to RGB
+        if (array_depth == 3):
+            self.image_array = YCbCr_to_RGB(self.image_array)
 
     def progressive_dct_scan(self, data:bytes) -> None:
         pass
@@ -603,6 +607,23 @@ def undo_zigzag(block:np.ndarray) -> np.ndarray:
     in the 8 x 8 block of pixels:
     array[x, y] = value on that pixel position
     """
+
+def YCbCr_to_RGB(image_array:np.ndarray) -> np.ndarray:
+    """Takes a 3-dimensional array representing an image in the YCbCr color
+    space, and returns an array of the image in the RGB color space:
+    array(width, heigth, YCbCr) -> array(width, heigth, RGB)
+    """
+    Y = image_array[..., 0].astype("float64")
+    Cb = image_array[..., 1].astype("float64")
+    Cr = image_array[..., 2].astype("float64")
+
+    R = Y + 1.402 * (Cr - 128.0)
+    G = Y - 0.34414 * (Cb - 128.0) - 0.71414 * (Cr - 128.0)
+    B = Y + 1.772 * (Cb - 128.0)
+
+    output = np.stack((R, G, B), axis=-1)
+
+    return np.round(output).astype("uint8")
 
 # ----------------------------------------------------------------------------
 # Decoder exceptions
