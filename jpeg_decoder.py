@@ -622,6 +622,7 @@ def YCbCr_to_RGB(image_array:np.ndarray) -> np.ndarray:
     B = Y + 1.772 * (Cb - 128.0)
 
     output = np.stack((R, G, B), axis=-1)
+    np.clip(output, a_min=0.0, a_max=255.0, out=output)
 
     return np.round(output).astype("uint8")
 
