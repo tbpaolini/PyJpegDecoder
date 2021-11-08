@@ -492,6 +492,15 @@ class JpegDecoder():
                 next_bits(amount=0, restart=True)
                 previous_dc[:] = 0
         
+        # Clip the image array to the image dimensions
+        self.image_array = self.image_array[0 : self.image_width, 0 : self.image_height, :]
+        """NOTE
+        When the image dimensions are not multiples of the MCU size, padding pixels are
+        added to the right and bottom edges of the image in order to make the dimensions
+        multiples.
+        Then it is the duty of the decoder to remove those extra pixels.
+        """
+        
         # Convert image from YCbCr to RGB
         if (array_depth == 3):
             self.image_array = YCbCr_to_RGB(self.image_array)
