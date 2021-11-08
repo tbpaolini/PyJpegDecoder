@@ -1,9 +1,10 @@
+from PIL.ImageTk import PhotoImage
 import numpy as np
 from collections import deque, namedtuple
 from itertools import product
 from math import cos, pi
-from numpy.core.numeric import indices
 from scipy.interpolate import griddata
+import tkinter as tk
 from typing import Callable, Tuple
 
 # JPEG markers (for our supported segments)
@@ -511,6 +512,77 @@ class JpegDecoder():
     def end_of_image(self, data:bytes) -> None:
         self.scan_finished = True
         del self.raw_file
+
+    def show(self):
+        """Display the decoded image in a window.
+        """
+        try:
+            import tkinter as tk
+            from tkinter import ttk
+        except ModuleNotFoundError:
+            self.show2()
+            return
+        from PIL import Image
+        from PIL.ImageTk import PhotoImage
+
+        # Create the window
+        window = tk.Tk()
+        window.title("Decoded JPEG")
+        window.state("zoomed")
+
+        # Horizontal and vertical scrollbars
+        scrollbar_h = ttk.Scrollbar(orient = tk.HORIZONTAL)
+        scrollbar_v = ttk.Scrollbar(orient = tk.VERTICAL)
+        
+        # Canvas where the image will be drawn
+        canvas = tk.Canvas(
+            width = self.image_width,
+            height = self.image_height,
+            scrollregion = (0, 0, self.image_width, self.image_height),
+            xscrollcommand = scrollbar_h.set,
+            yscrollcommand = scrollbar_v.set,
+        )
+        scrollbar_h["command"] = canvas.xview
+        scrollbar_v["command"] = canvas.yview
+        
+        # Convert the image array to a format that Tkinter understands
+        my_image = PhotoImage(
+            Image.fromarray(
+                np.swapaxes(self.image_array, 0, 1)
+            )
+        )
+
+        # Draw the image to the canvas
+        canvas.create_image(0, 0, image=my_image, anchor="nw")
+
+        # Add the canvas and scrollbars to the window
+        canvas.pack()
+        scrollbar_h.pack(
+            side = tk.BOTTOM,
+            fill = tk.X,
+            before = canvas,
+        )
+        scrollbar_v.pack(
+            side = tk.RIGHT,
+            fill = tk.Y,
+            before = canvas,
+        )
+
+        # Open the window
+        window.mainloop()
+
+    def show2(self):
+        """Display the decoded image in the default image viewer of the operating system.
+        """
+        try:
+            from PIL import Image
+        except ModuleNotFoundError:
+            print("The Pillow module needs to be installed in order to display the rendered image.")
+            print("For more info: https://pillow.readthedocs.io/en/stable/installation.html")
+            return
+        
+        img = np.swapaxes(self.image_array, 0, 1)
+        Image.fromarray(img).show()
 
 
 class InverseDCT():
