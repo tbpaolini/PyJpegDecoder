@@ -267,6 +267,7 @@ class JpegDecoder():
 
         # Get parameters of the components in the scan
         my_huffman_tables = {}
+        my_color_components = {}
         for component in range(components_amount):
             component_id = data[data_header]    # Should match the component ID's on the 'start of frame'
             data_header += 1
@@ -286,6 +287,7 @@ class JpegDecoder():
 
             # Store the parameters
             my_huffman_tables.update({component_id: HuffmanTable(dc=dc_table, ac=ac_table)})
+            my_color_components.update({component_id: self.color_components[component_id]})
         
         # Get spectral selection and successive approximation
         if self.scan_mode == "progressive_dct":
@@ -334,9 +336,16 @@ class JpegDecoder():
 
         # Begin the scan of the entropy encoded segment
         if self.scan_mode == "baseline_dct":
-            self.baseline_dct_scan(my_huffman_tables)
+            self.baseline_dct_scan(my_huffman_tables, my_color_components)
         elif self.scan_mode == "progressive_dct":
-            self.progressive_dct_scan(data)
+            self.progressive_dct_scan(
+                my_huffman_tables,
+                my_color_components,
+                spectral_selection_start,
+                spectral_selection_end,
+                bit_position_high,
+                bit_position_low
+            )
         else:
             raise UnsupportedJpeg("Encoding mode not supported. Only 'Baseline DCT' and 'Progressive DCT' are supported.")
     
@@ -377,11 +386,11 @@ class JpegDecoder():
         # Return the nested function
         return get_bits
 
-    def baseline_dct_scan(self, huffman_tables_id:dict) -> None:
+    def baseline_dct_scan(self, huffman_tables_id:dict, my_color_components:dict) -> None:
         """Decode the image data from the entropy encoded segment.
 
-        The file header is should be at the beginning of said segment, and at
-        the after the decoding the header will be at the end of the segment.
+        The file header should be at the beginning of said segment, and at
+        the after the decoding the header will be moved to the end of the segment.
         """
         # Function to read the bits from the file's bytes
         next_bits = self.bits_generator()
@@ -414,7 +423,7 @@ class JpegDecoder():
             mcu_y, mcu_x = divmod(current_mcu, self.mcu_count_h)
             
             # Loop through all color components
-            for depth, (component_id, component) in enumerate(self.color_components.items()):
+            for depth, (component_id, component) in enumerate(my_color_components.items()):
 
                 # Quantization table of the color component
                 quantization_table = self.quantization_tables[component.quantization_table_id]
@@ -510,6 +519,11 @@ class JpegDecoder():
             if (self.restart_interval > 0) and (current_mcu % self.restart_interval == 0):
                 next_bits(amount=0, restart=True)
                 previous_dc[:] = 0
+
+    def progressive_dct_scan(self, data:bytes) -> None:
+        pass
+
+    def end_of_image(self, data:bytes) -> None:
         
         # Clip the image array to the image dimensions
         self.image_array = self.image_array[0 : self.image_width, 0 : self.image_height, :]
@@ -523,11 +537,7 @@ class JpegDecoder():
         # Convert image from YCbCr to RGB
         if (self.array_depth == 3):
             self.image_array = YCbCr_to_RGB(self.image_array)
-
-    def progressive_dct_scan(self, data:bytes) -> None:
-        pass
-
-    def end_of_image(self, data:bytes) -> None:
+        
         self.scan_finished = True
         self.show()
         del self.raw_file
@@ -750,7 +760,7 @@ class UnsupportedJpeg(JpegError):
 # Run script
 
 if __name__ == "__main__":
-    jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago.jpg")
+    jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (3).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (3).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg")
