@@ -520,8 +520,38 @@ class JpegDecoder():
                 next_bits(amount=0, restart=True)
                 previous_dc[:] = 0
 
-    def progressive_dct_scan(self, data:bytes) -> None:
-        pass
+    def progressive_dct_scan(self,
+        huffman_tables_id:dict,
+        my_color_components:dict,
+        spectral_selection_start:int,
+        spectral_selection_end:int,
+        bit_position_high:int,
+        bit_position_low:int) -> None:
+
+        # Whether to the scan contains DC or AC values
+        if (spectral_selection_start == 0) and (spectral_selection_end == 0):
+            values = "dc"
+        elif (spectral_selection_start > 0) and (spectral_selection_end >= spectral_selection_start):
+            values = "ac"
+        else:
+            raise CorruptedJpeg("Progressive JPEG images cannot contain both DC and AC values in the same scan.")
+        """NOTE
+        In sequential JPEG both DC and AC values come in the same scan, however in progressive JPEG
+        they must come in different scans.
+        """
+        
+        # Whether this is a refining scan
+        if bit_position_high == 0:
+            refining = False
+        elif (bit_position_high - bit_position_low) == 1:
+            refining = True
+        else:
+            raise CorruptedJpeg("Progressive JPEG images cannot contain more than 1 bit for each value on a refining scan.")
+        """NOTE
+        The first scan of a value sends a certain amount of the value's most significant bits.
+        The following scans of the same value send the next bits, in order, one bit per scan.
+        Those scans are called "refining scans".
+        """
 
     def end_of_image(self, data:bytes) -> None:
         
