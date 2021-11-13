@@ -22,7 +22,7 @@ EOI  = bytes.fromhex("FFD9")    # End of image
 RST = tuple(bytes.fromhex(hex(marker)[2:]) for marker in range(0xFFD0, 0xFFD8))
 
 # Containers for the parameters of each color component
-ColorComponent = namedtuple("ColorComponent", "name vertical_sampling horizontal_sampling quantization_table_id repeat shape")
+ColorComponent = namedtuple("ColorComponent", "name order vertical_sampling horizontal_sampling quantization_table_id repeat shape")
 HuffmanTable = namedtuple("HuffmanTable", "dc ac")
 
 class JpegDecoder():
@@ -60,6 +60,7 @@ class JpegDecoder():
         self.huffman_tables = {}        # Hold all huffman tables
         self.quantization_tables = {}   # Hold all quantization tables
         self.restart_interval = 0       # How many MCU's before each restart marker
+        self.image_array = None         # Store the color values for each pixel of the image
 
         # Loop to find and process the supported file segments
         while not self.scan_finished:
@@ -160,6 +161,7 @@ class JpegDecoder():
                 # Group the parameters of the component
                 my_component = ColorComponent(
                     name = component,                                       # Name of the color component
+                    order = count-1,                                        # Order in which the component will come in the image
                     horizontal_sampling = horizontal_sample,                # Amount of pixels sampled in the horizontal
                     vertical_sampling = vertical_sample,                    # # Amount of pixels sampled in the vertical
                     quantization_table_id = my_quantization_table,          # Quantization table selector
@@ -297,22 +299,24 @@ class JpegDecoder():
             else:
                 raise CorruptedJpeg("Image height cannot be zero.")
 
-        # Dimensions of the MCU (minimum coding unit)
-        self.mcu_width:int = 8 * max(component.horizontal_sampling for component in self.color_components.values())
-        self.mcu_height:int = 8 * max(component.vertical_sampling for component in self.color_components.values())
-        self.mcu_shape = (self.mcu_width, self.mcu_height)
+        # Create the image array (if one does not exist already)
+        if self.image_array is None:
+            # Dimensions of the MCU (minimum coding unit)
+            self.mcu_width:int = 8 * max(component.horizontal_sampling for component in self.color_components.values())
+            self.mcu_height:int = 8 * max(component.vertical_sampling for component in self.color_components.values())
+            self.mcu_shape = (self.mcu_width, self.mcu_height)
 
-        # Amount of MCU's in the whole image (horizontal, vertical, and total)
-        self.mcu_count_h = (self.image_width // self.mcu_width) + (0 if self.image_width % self.mcu_width == 0 else 1)
-        self.mcu_count_v = (self.image_height // self.mcu_height) + (0 if self.image_height % self.mcu_height == 0 else 1)
-        self.mcu_count = self.mcu_count_h * self.mcu_count_v
+            # Amount of MCU's in the whole image (horizontal, vertical, and total)
+            self.mcu_count_h = (self.image_width // self.mcu_width) + (0 if self.image_width % self.mcu_width == 0 else 1)
+            self.mcu_count_v = (self.image_height // self.mcu_height) + (0 if self.image_height % self.mcu_height == 0 else 1)
+            self.mcu_count = self.mcu_count_h * self.mcu_count_v
 
-        # 3-dimensional array to store the color values of each pixel on the image
-        # array(x-coordinate, y-coordinate, RBG-color)
-        self.array_width = self.mcu_width * self.mcu_count_h
-        self.array_height = self.mcu_height * self.mcu_count_v
-        self.array_depth = len(self.color_components)
-        self.image_array = np.zeros(shape=(self.array_width, self.array_height, self.array_depth), dtype="int16")
+            # 3-dimensional array to store the color values of each pixel on the image
+            # array(x-coordinate, y-coordinate, RBG-color)
+            self.array_width = self.mcu_width * self.mcu_count_h
+            self.array_height = self.mcu_height * self.mcu_count_v
+            self.array_depth = len(self.color_components)
+            self.image_array = np.zeros(shape=(self.array_width, self.array_height, self.array_depth), dtype="int16")
 
         # Begin the scan of the entropy encoded segment
         if self.scan_mode == "baseline_dct":
@@ -482,7 +486,7 @@ class JpegDecoder():
                 # Add the MCU to the image
                 x = self.mcu_width * mcu_x
                 y = self.mcu_height * mcu_y
-                self.image_array[x : x+self.mcu_width, y : y+self.mcu_height, depth] = my_mcu
+                self.image_array[x : x+self.mcu_width, y : y+self.mcu_height, component.order] = my_mcu
             
             # Go to the next MCU
             current_mcu += 1
@@ -511,6 +515,7 @@ class JpegDecoder():
 
     def end_of_image(self, data:bytes) -> None:
         self.scan_finished = True
+        self.show()
         del self.raw_file
 
     def show(self):
@@ -528,7 +533,10 @@ class JpegDecoder():
         # Create the window
         window = tk.Tk()
         window.title("Decoded JPEG")
-        window.state("zoomed")
+        try:
+            window.state("zoomed")
+        except tk.TclError:
+            window.state("normal")
 
         # Horizontal and vertical scrollbars
         scrollbar_h = ttk.Scrollbar(orient = tk.HORIZONTAL)
@@ -728,6 +736,7 @@ class UnsupportedJpeg(JpegError):
 # Run script
 
 if __name__ == "__main__":
+    # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (3).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg")
     pass
