@@ -416,7 +416,7 @@ class JpegDecoder():
 
         # Decode all the MCU's in the entropy encoded data
         current_mcu = 0
-        previous_dc = np.zeros(self.array_depth, dtype="int16")
+        previous_dc = np.zeros(len(my_color_components), dtype="int16")
         while (current_mcu < self.mcu_count):
             
             # (x, y) coordinates, on the image, for the current MCU
