@@ -287,6 +287,20 @@ class JpegDecoder():
             # Store the parameters
             my_huffman_tables.update({component_id: HuffmanTable(dc=dc_table, ac=ac_table)})
         
+        # Get spectral selection and successive approximation
+        if self.scan_mode == "progressive_dct":
+            spectral_selection_start = data[data_header]    # Index of the first values of the data unit
+            spectral_selection_end = data[data_header+1]    # Index of the last values of the data unit
+            bit_position_high = data[data_header+2] >> 4    # The position of the last bit sent in the previous scan
+            bit_position_low = data[data_header+2] & 0x0F   # The position of the bit sent in the current scan
+            """NOTE
+            The data unit is formed by blocks of 8 x 8 pixels (64 values in total, indexed from 0 to 63).
+            The progressive scan breaks the values in different scans. And the bits of those values can
+            also be broken in separate scans. It is up to the encoder to decide how to split the data.
+            After all scans, it should be possible to reconstruct all values of all data units.
+            """
+            data_header += 3
+        
         # Move the file header to the begining of the entropy encoded segment
         self.file_header += data_size
 
@@ -736,6 +750,7 @@ class UnsupportedJpeg(JpegError):
 # Run script
 
 if __name__ == "__main__":
+    jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago.jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (3).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg")
