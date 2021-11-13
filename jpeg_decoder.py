@@ -297,6 +297,23 @@ class JpegDecoder():
             else:
                 raise CorruptedJpeg("Image height cannot be zero.")
 
+        # Dimensions of the MCU (minimum coding unit)
+        self.mcu_width:int = 8 * max(component.horizontal_sampling for component in self.color_components.values())
+        self.mcu_height:int = 8 * max(component.vertical_sampling for component in self.color_components.values())
+        self.mcu_shape = (self.mcu_width, self.mcu_height)
+
+        # Amount of MCU's in the whole image (horizontal, vertical, and total)
+        self.mcu_count_h = (self.image_width // self.mcu_width) + (0 if self.image_width % self.mcu_width == 0 else 1)
+        self.mcu_count_v = (self.image_height // self.mcu_height) + (0 if self.image_height % self.mcu_height == 0 else 1)
+        self.mcu_count = self.mcu_count_h * self.mcu_count_v
+
+        # 3-dimensional array to store the color values of each pixel on the image
+        # array(x-coordinate, y-coordinate, RBG-color)
+        self.array_width = self.mcu_width * self.mcu_count_h
+        self.array_height = self.mcu_height * self.mcu_count_v
+        self.array_depth = len(self.color_components)
+        self.image_array = np.zeros(shape=(self.array_width, self.array_height, self.array_depth), dtype="int16")
+
         # Begin the scan of the entropy encoded segment
         if self.scan_mode == "baseline_dct":
             self.baseline_dct_scan(my_huffman_tables)
@@ -359,27 +376,10 @@ class JpegDecoder():
             while huffman_value is None:
                 codeword += next_bits()
                 if len(codeword) > 16:
-                    raise CorruptedJpeg(f"Failed to decode image ({current_mcu}/{mcu_count} MCU's decoded).")
+                    raise CorruptedJpeg(f"Failed to decode image ({current_mcu}/{self.mcu_count} MCU's decoded).")
                 huffman_value = huffman_table.get(codeword)
             
             return huffman_value
-
-        # Dimensions of the MCU (minimum coding unit)
-        mcu_width:int = 8 * max(component.horizontal_sampling for component in self.color_components.values())
-        mcu_height:int = 8 * max(component.vertical_sampling for component in self.color_components.values())
-        mcu_shape = (mcu_width, mcu_height)
-
-        # Amount of MCU's in the whole image (horizontal, vertical, and total)
-        mcu_count_h = (self.image_width // mcu_width) + (0 if self.image_width % mcu_width == 0 else 1)
-        mcu_count_v = (self.image_height // mcu_height) + (0 if self.image_height % mcu_height == 0 else 1)
-        mcu_count = mcu_count_h * mcu_count_v
-
-        # 3-dimensional array to store the color values of each pixel on the image
-        # array(x-coordinate, y-coordinate, RBG-color)
-        array_width = mcu_width * mcu_count_h
-        array_height = mcu_height * mcu_count_v
-        array_depth = len(self.color_components)
-        self.image_array = np.zeros(shape=(array_width, array_height, array_depth), dtype="int16")
 
         # Function to perform the inverse discrete cosine transform (IDCT)
         idct = InverseDCT()
@@ -389,11 +389,11 @@ class JpegDecoder():
 
         # Decode all the MCU's in the entropy encoded data
         current_mcu = 0
-        previous_dc = np.zeros(array_depth, dtype="int16")
-        while (current_mcu < mcu_count):
+        previous_dc = np.zeros(self.array_depth, dtype="int16")
+        while (current_mcu < self.mcu_count):
             
             # (x, y) coordinates, on the image, for the current MCU
-            mcu_y, mcu_x = divmod(current_mcu, mcu_count_h)
+            mcu_y, mcu_x = divmod(current_mcu, self.mcu_count_h)
             
             # Loop through all color components
             for depth, (component_id, component) in enumerate(self.color_components.items()):
@@ -473,20 +473,20 @@ class JpegDecoder():
                     my_mcu[block_x : block_x+8, block_y : block_y+8] = block
             
                 # Upsample the block if necessary
-                if my_mcu.shape != mcu_shape:
-                    my_mcu = resize(my_mcu, mcu_shape)
+                if my_mcu.shape != self.mcu_shape:
+                    my_mcu = resize(my_mcu, self.mcu_shape)
                 """NOTE
                 Linear interpolation is performed on subsampled color components.
                 """
                 
                 # Add the MCU to the image
-                x = mcu_width * mcu_x
-                y = mcu_height * mcu_y
-                self.image_array[x : x+mcu_width, y : y+mcu_height, depth] = my_mcu
+                x = self.mcu_width * mcu_x
+                y = self.mcu_height * mcu_y
+                self.image_array[x : x+self.mcu_width, y : y+self.mcu_height, depth] = my_mcu
             
             # Go to the next MCU
             current_mcu += 1
-            print(f"{current_mcu}/{mcu_count}", end="\r")
+            print(f"{current_mcu}/{self.mcu_count}", end="\r")
             
             # Check for restart interval
             if (self.restart_interval > 0) and (current_mcu % self.restart_interval == 0):
@@ -503,7 +503,7 @@ class JpegDecoder():
         """
         
         # Convert image from YCbCr to RGB
-        if (array_depth == 3):
+        if (self.array_depth == 3):
             self.image_array = YCbCr_to_RGB(self.image_array)
 
     def progressive_dct_scan(self, data:bytes) -> None:
