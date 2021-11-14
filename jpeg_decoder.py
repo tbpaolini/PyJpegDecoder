@@ -57,6 +57,7 @@ class JpegDecoder():
         self.image_width = 0            # Width in pixels of the image
         self.image_height = 0           # Height in pixels of the image
         self.color_components = {}      # Hold each color component and its respective paramenters
+        self.sample_shape = ()          # Size to upsample the subsampled color components
         self.huffman_tables = {}        # Hold all huffman tables
         self.quantization_tables = {}   # Hold all quantization tables
         self.restart_interval = 0       # How many MCU's before each restart marker
@@ -178,6 +179,12 @@ class JpegDecoder():
         
         except IndexError:
             raise CorruptedJpeg("Failed to parse the start of frame.")
+        
+        # Shape of the sampling area
+        # (these values will be used to upsample the subsampled color components)
+        sample_width = max(component.shape[0] for component in self.color_components.values())
+        sample_height = max(component.shape[1] for component in self.color_components.values())
+        self.sample_shape = (sample_width, sample_height)
         
         # Move the file header to the end of the data segment
         self.file_header += data_size
@@ -315,22 +322,36 @@ class JpegDecoder():
             else:
                 raise CorruptedJpeg("Image height cannot be zero.")
 
-        # Create the image array (if one does not exist already)
-        if self.image_array is None:
-            # Dimensions of the MCU (minimum coding unit)
+        # Dimensions of the MCU (minimum coding unit)
+        if components_amount > 1:
             self.mcu_width:int = 8 * max(component.horizontal_sampling for component in self.color_components.values())
             self.mcu_height:int = 8 * max(component.vertical_sampling for component in self.color_components.values())
             self.mcu_shape = (self.mcu_width, self.mcu_height)
+        else:
+            self.mcu_width:int = 8
+            self.mcu_height:int = 8
+            self.mcu_shape = (8, 8)
+        """NOTE
+        If there is only one color component in the scan, then the MCU size is always 8 x 8.
 
-            # Amount of MCU's in the whole image (horizontal, vertical, and total)
-            self.mcu_count_h = (self.image_width // self.mcu_width) + (0 if self.image_width % self.mcu_width == 0 else 1)
-            self.mcu_count_v = (self.image_height // self.mcu_height) + (0 if self.image_height % self.mcu_height == 0 else 1)
-            self.mcu_count = self.mcu_count_h * self.mcu_count_v
+        If there is more than one color component, the MCU size is determined by the component
+        with the highest resolution (considering all the components of the image, not only the
+        components in the scan).
+        """
 
+        # Amount of MCU's in the whole image (horizontal, vertical, and total)
+        self.mcu_count_h = (self.image_width // self.mcu_width) + (0 if self.image_width % self.mcu_width == 0 else 1)
+        self.mcu_count_v = (self.image_height // self.mcu_height) + (0 if self.image_height % self.mcu_height == 0 else 1)
+        self.mcu_count = self.mcu_count_h * self.mcu_count_v
+
+        # Create the image array (if one does not exist already)
+        if self.image_array is None:
             # 3-dimensional array to store the color values of each pixel on the image
             # array(x-coordinate, y-coordinate, RBG-color)
-            self.array_width = self.mcu_width * self.mcu_count_h
-            self.array_height = self.mcu_height * self.mcu_count_v
+            count_h = (self.image_width // self.sample_shape[0]) + (0 if self.image_width % self.sample_shape[0] == 0 else 1)
+            count_v = (self.image_height // self.sample_shape[1]) + (0 if self.image_height % self.sample_shape[1] == 0 else 1)
+            self.array_width = self.sample_shape[0] * count_h
+            self.array_height = self.sample_shape[1] * count_v
             self.array_depth = len(self.color_components)
             self.image_array = np.zeros(shape=(self.array_width, self.array_height, self.array_depth), dtype="int16")
 
@@ -414,9 +435,12 @@ class JpegDecoder():
         # Function to resize a block of color values
         resize = ResizeGrid()
 
+        # Number of color components in the scan
+        components_amount = len(my_color_components)
+        
         # Decode all the MCU's in the entropy encoded data
         current_mcu = 0
-        previous_dc = np.zeros(len(my_color_components), dtype="int16")
+        previous_dc = np.zeros(components_amount, dtype="int16")
         while (current_mcu < self.mcu_count):
             
             # (x, y) coordinates, on the image, for the current MCU
@@ -429,9 +453,19 @@ class JpegDecoder():
                 quantization_table = self.quantization_tables[component.quantization_table_id]
 
                 # Minimum coding unit (MCU) of the component
-                my_mcu = np.zeros(shape=component.shape, dtype="int16")
+                if components_amount > 1:
+                    my_mcu = np.zeros(shape=component.shape, dtype="int16")
+                    repeat = component.repeat
+                else:
+                    my_mcu = np.zeros(shape=(8, 8), dtype="int16")
+                    repeat = 1
+                """NOTE
+                When there is more than one color component in the scan, the components are
+                interleaved. And the component with the highest resolution is repeated enough
+                times to cover the area of the subsampled components.
+                """
                 
-                for block_count in range(component.repeat):
+                for block_count in range(repeat):
                     # Block of 8 x 8 pixels for the color component
                     block = np.zeros(64, dtype="int16")
                     
@@ -500,8 +534,8 @@ class JpegDecoder():
                     my_mcu[block_x : block_x+8, block_y : block_y+8] = block
             
                 # Upsample the block if necessary
-                if my_mcu.shape != self.mcu_shape:
-                    my_mcu = resize(my_mcu, self.mcu_shape)
+                if component.shape != self.sample_shape:
+                    my_mcu = resize(my_mcu, self.sample_shape)
                 """NOTE
                 Linear interpolation is performed on subsampled color components.
                 """
@@ -790,7 +824,7 @@ class UnsupportedJpeg(JpegError):
 # Run script
 
 if __name__ == "__main__":
-    jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (3).jpg")
+    # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago.jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (3).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg")
