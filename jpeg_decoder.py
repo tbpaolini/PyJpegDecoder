@@ -550,9 +550,13 @@ class JpegDecoder():
             print(f"{current_mcu}/{self.mcu_count}", end="\r")
             
             # Check for restart interval
-            if (self.restart_interval > 0) and (current_mcu % self.restart_interval == 0):
+            if (self.restart_interval > 0) and (current_mcu % self.restart_interval == 0) and (current_mcu != self.mcu_count):
                 next_bits(amount=0, restart=True)
                 previous_dc[:] = 0
+            """NOTE
+            When the Restart Interval is reached, the previous DC values are reseted to zero
+            and the file header is moved to the byte boundary after the marker.
+            """
 
     def progressive_dct_scan(self,
         huffman_tables_id:dict,
@@ -827,5 +831,5 @@ if __name__ == "__main__":
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago.jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (3).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
-    # jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg")
+    jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg")
     pass
