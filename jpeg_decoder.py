@@ -663,39 +663,51 @@ class JpegDecoder():
             only gives this amount of the first bits of the value on the first scan.
             """
             if not refining:
+                # Previous DC values
                 previous_dc = np.zeros(components_amount, dtype="int16")
 
                 while (current_mcu < self.mcu_count):
                     
-                    # (x, y) coordinates, on the image, for the current MCU
-                    mcu_y, mcu_x = divmod(current_mcu, self.mcu_count_h)
-                    
                     # Loop through all color components
                     for depth, (component_id, component) in enumerate(my_color_components.items()):
 
-                        # Quantization table of the color component
-                        quantization_table = self.quantization_tables[component.quantization_table_id]
-
                         # Minimum coding unit (MCU) of the component
                         if components_amount > 1:
-                            my_mcu = np.zeros(shape=component.shape, dtype="int16")
                             repeat = component.repeat
                         else:
-                            my_mcu = np.zeros(shape=(8, 8), dtype="int16")
                             repeat = 1
                         
+                        # Blocks of 8 x 8 pixels for the color component
                         for block_count in range(repeat):
-                            # Block of 8 x 8 pixels for the color component
-                            block = np.zeros(64, dtype="int16")
+                            
+                            # Value index on the temporary storage
+                            index = 64 * current_mcu
+                            my_dct_values = self.progressive_dct_values[component_id]
                             
                             # DC value of the block
                             table_id = huffman_tables_id[component_id].dc
                             huffman_table:dict = self.huffman_tables[table_id]
                             huffman_value = next_huffval()
                             
+                            # Get the DC value (partial)
                             dc_value = bin_twos_complement(next_bits(huffman_value)) + previous_dc[depth]
                             previous_dc[depth] = dc_value
-                            block[0] = dc_value
+                            
+                            # Store the partial DC value
+                            my_dct_values[index] = dc_value << bit_position_low
+                            """NOTE
+                            'bit_position_low' is the position of the last value's bit sent in the scan.
+                            So the partial value has its bits left-shifted by this amount.
+                            """
+                    
+                    # Go to the next MCU
+                    current_mcu += 1
+                    print(f"{current_mcu}/{self.mcu_count}", end="\r")
+                    
+                    # Check for restart interval
+                    if (self.restart_interval > 0) and (current_mcu % self.restart_interval == 0) and (current_mcu != self.mcu_count):
+                        next_bits(amount=0, restart=True)
+                        previous_dc[:] = 0
 
             # Refining scan (DC)
             else:
@@ -949,8 +961,8 @@ class UnsupportedJpeg(JpegError):
 # Run script
 
 if __name__ == "__main__":
-    # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago.jpg")
+    jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago.jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (3).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
-    jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg")
+    # jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg")
     pass
