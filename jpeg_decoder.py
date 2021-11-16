@@ -63,6 +63,10 @@ class JpegDecoder():
         self.restart_interval = 0       # How many MCU's before each restart marker
         self.image_array = None         # Store the color values for each pixel of the image
 
+        # Temporary storage for the values on a progressive scan
+        self.progressive_dct_values = None      # The partially decoded values
+        self.progressive_dct_completed = None   # Which values have been fully decoded
+
         # Main loop to find and process the supported file segments
         """NOTE
         We are sequentially looking for markers on the file. Once a recognized
@@ -361,6 +365,24 @@ class JpegDecoder():
             self.array_height = self.sample_shape[1] * count_v
             self.array_depth = len(self.color_components)
             self.image_array = np.zeros(shape=(self.array_width, self.array_height, self.array_depth), dtype="int16")
+        
+        # Create arrays to store temporarily the data for a progressive scan
+        if self.scan_mode == "progressive_dct":
+            
+            if self.progressive_dct_values is None:
+                self.progressive_dct_values = {}
+                sample_prod = np.prod(self.sample_shape)
+                max_values_amount = self.image_array.size
+
+                for component_id, component in self.color_components.items():
+                    ratio = sample_prod / np.prod(component.shape)
+                    values_amount = round(max_values_amount / ratio)
+                    values = np.zeros(values_amount, dtype="int16")
+                    
+                    self.progressive_dct_values.update({component_id: values})
+
+            if self.progressive_dct_completed is None:
+                self.progressive_dct_completed = np.zeros(shape=(8, 8, self.array_depth), dtype="bool")
 
         # Begin the scan of the entropy encoded segment
         if self.scan_mode == "baseline_dct":
@@ -597,6 +619,98 @@ class JpegDecoder():
         The following scans of the same value send the next bits, in order, one bit per scan.
         Those scans are called "refining scans".
         """
+
+        # Function to read the bits from the file's bytes
+        next_bits = self.bits_generator()
+
+        # Function to decode the next Huffman value
+        def next_huffval() -> int:
+            codeword = ""
+            huffman_value = None
+
+            while huffman_value is None:
+                codeword += next_bits()
+                if len(codeword) > 16:
+                    raise CorruptedJpeg(f"Failed to decode image ({current_mcu}/{self.mcu_count} MCU's decoded).")
+                huffman_value = huffman_table.get(codeword)
+            
+            return huffman_value
+
+        # Function to perform the inverse discrete cosine transform (IDCT)
+        idct = InverseDCT()
+
+        # Function to resize a block of color values
+        resize = ResizeGrid()
+
+        # Beginning of scan
+        current_mcu = 0
+        components_amount = len(my_color_components)
+        if (values == "ac") and (components_amount > 1):
+            raise CorruptedJpeg("An AC progressive scan can only have a single color component.")
+        """NOTE
+        A DC progressive scan can have more than one color component, while an AC progressive
+        scan must have only one color component.
+        """
+
+        # DC values scan
+        if values == "dc":
+            
+            # First scan (DC)
+            """NOTE
+            For the most part, the first DC scan on progressive mode is the same as on baseline mode.
+            The only difference is that the decoded value needs to have to undergo through a left
+            bit shift by the amount specified in 'bit_position_low', because the progressive scan
+            only gives this amount of the first bits of the value on the first scan.
+            """
+            if not refining:
+                previous_dc = np.zeros(components_amount, dtype="int16")
+
+                while (current_mcu < self.mcu_count):
+                    
+                    # (x, y) coordinates, on the image, for the current MCU
+                    mcu_y, mcu_x = divmod(current_mcu, self.mcu_count_h)
+                    
+                    # Loop through all color components
+                    for depth, (component_id, component) in enumerate(my_color_components.items()):
+
+                        # Quantization table of the color component
+                        quantization_table = self.quantization_tables[component.quantization_table_id]
+
+                        # Minimum coding unit (MCU) of the component
+                        if components_amount > 1:
+                            my_mcu = np.zeros(shape=component.shape, dtype="int16")
+                            repeat = component.repeat
+                        else:
+                            my_mcu = np.zeros(shape=(8, 8), dtype="int16")
+                            repeat = 1
+                        
+                        for block_count in range(repeat):
+                            # Block of 8 x 8 pixels for the color component
+                            block = np.zeros(64, dtype="int16")
+                            
+                            # DC value of the block
+                            table_id = huffman_tables_id[component_id].dc
+                            huffman_table:dict = self.huffman_tables[table_id]
+                            huffman_value = next_huffval()
+                            
+                            dc_value = bin_twos_complement(next_bits(huffman_value)) + previous_dc[depth]
+                            previous_dc[depth] = dc_value
+                            block[0] = dc_value
+
+            # Refining scan (DC)
+            else:
+                pass
+
+        # AC values scan
+        elif values == "ac":
+            
+            # First scan (AC)
+            if not refining:
+                pass
+
+            # Refining scan (AC)
+            else:
+                pass
 
     def end_of_image(self, data:bytes) -> None:
         
