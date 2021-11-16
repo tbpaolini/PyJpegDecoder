@@ -666,24 +666,26 @@ class JpegDecoder():
                 # Previous DC values
                 previous_dc = np.zeros(components_amount, dtype="int16")
 
-                while (current_mcu < self.mcu_count):
-                    
-                    # Loop through all color components
-                    for depth, (component_id, component) in enumerate(my_color_components.items()):
+            while (current_mcu < self.mcu_count):
+                
+                # Loop through all color components
+                for depth, (component_id, component) in enumerate(my_color_components.items()):
 
-                        # Minimum coding unit (MCU) of the component
-                        if components_amount > 1:
-                            repeat = component.repeat
-                        else:
-                            repeat = 1
+                    # Minimum coding unit (MCU) of the component
+                    if components_amount > 1:
+                        repeat = component.repeat
+                    else:
+                        repeat = 1
+                    
+                    # Blocks of 8 x 8 pixels for the color component
+                    for block_count in range(repeat):
                         
-                        # Blocks of 8 x 8 pixels for the color component
-                        for block_count in range(repeat):
-                            
-                            # Value index on the temporary storage
-                            index = 64 * current_mcu
-                            my_dct_values = self.progressive_dct_values[component_id]
-                            
+                        # Value index on the temporary storage
+                        index = 64 * current_mcu
+                        my_dct_values = self.progressive_dct_values[component_id]
+                        
+                        # First scan of the DC values
+                        if not refining:
                             # DC value of the block
                             table_id = huffman_tables_id[component_id].dc
                             huffman_table:dict = self.huffman_tables[table_id]
@@ -694,24 +696,30 @@ class JpegDecoder():
                             previous_dc[depth] = dc_value
                             
                             # Store the partial DC value
-                            my_dct_values[index] = dc_value << bit_position_low
+                            my_dct_values[index] = (dc_value << bit_position_low)
                             """NOTE
                             'bit_position_low' is the position of the last value's bit sent in the scan.
                             So the partial value has its bits left-shifted by this amount.
                             """
-                    
-                    # Go to the next MCU
-                    current_mcu += 1
-                    print(f"{current_mcu}/{self.mcu_count}", end="\r")
-                    
-                    # Check for restart interval
-                    if (self.restart_interval > 0) and (current_mcu % self.restart_interval == 0) and (current_mcu != self.mcu_count):
-                        next_bits(amount=0, restart=True)
-                        previous_dc[:] = 0
-
-            # Refining scan (DC)
-            else:
-                pass
+                        
+                        # Refining scan for the DC values
+                        else:
+                            new_bit = int(next_bits())
+                            my_dct_values[index] |= (new_bit << bit_position_low)
+                            """NOTE
+                            A refining scan of the DC values just sent the next bit of each value, in the
+                            same order as the partial values were sent.
+                            So the bit is just OR'ed to the existing values, in the position the bit belongs.
+                            """
+                
+                # Go to the next MCU
+                current_mcu += 1
+                print(f"{current_mcu}/{self.mcu_count}", end="\r")
+                
+                # Check for restart interval
+                if (self.restart_interval > 0) and (current_mcu % self.restart_interval == 0) and (current_mcu != self.mcu_count):
+                    next_bits(amount=0, restart=True)
+                    previous_dc[:] = 0
 
         # AC values scan
         elif values == "ac":
