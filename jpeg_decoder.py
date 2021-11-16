@@ -63,7 +63,14 @@ class JpegDecoder():
         self.restart_interval = 0       # How many MCU's before each restart marker
         self.image_array = None         # Store the color values for each pixel of the image
 
-        # Loop to find and process the supported file segments
+        # Main loop to find and process the supported file segments
+        """NOTE
+        We are sequentially looking for markers on the file. Once a recognized
+        marker is found, control is passed to a method to handle it. The method
+        then gives the control back to the main loop, which continues from where
+        the method stopped.
+        If the marker isn't recognized, then its data segment is just skipped.
+        """
         while not self.scan_finished:
             try:
                 current_byte = self.raw_file[self.file_header]
