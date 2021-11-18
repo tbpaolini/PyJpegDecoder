@@ -62,10 +62,7 @@ class JpegDecoder():
         self.quantization_tables = {}   # Hold all quantization tables
         self.restart_interval = 0       # How many MCU's before each restart marker
         self.image_array = None         # Store the color values for each pixel of the image
-
-        # Temporary storage for the values on a progressive scan
-        self.progressive_dct_values = None      # The partially decoded values
-        self.progressive_dct_completed = None   # Which values have been fully decoded
+        self.progressive_dct_completed = None   # Which values have been fully decoded in a progressive scan
 
         # Main loop to find and process the supported file segments
         """NOTE
@@ -367,22 +364,8 @@ class JpegDecoder():
             self.image_array = np.zeros(shape=(self.array_width, self.array_height, self.array_depth), dtype="int16")
         
         # Create arrays to store temporarily the data for a progressive scan
-        if self.scan_mode == "progressive_dct":
-            
-            if self.progressive_dct_values is None:
-                self.progressive_dct_values = {}
-                sample_prod = np.prod(self.sample_shape)
-                max_values_amount = self.image_array.size
-
-                for component_id, component in self.color_components.items():
-                    ratio = sample_prod / np.prod(component.shape)
-                    values_amount = round(max_values_amount / ratio)
-                    values = np.zeros(values_amount, dtype="int16")
-                    
-                    self.progressive_dct_values.update({component_id: values})
-
-            if self.progressive_dct_completed is None:
-                self.progressive_dct_completed = np.zeros(shape=(8, 8, self.array_depth), dtype="bool")
+        if (self.scan_mode == "progressive_dct") and (self.progressive_dct_completed is None):
+            self.progressive_dct_completed = np.zeros(shape=(8, 8, self.array_depth), dtype="bool")
 
         # Begin the scan of the entropy encoded segment
         if self.scan_mode == "baseline_dct":
@@ -667,6 +650,10 @@ class JpegDecoder():
                 previous_dc = np.zeros(components_amount, dtype="int16")
 
             while (current_mcu < self.mcu_count):
+
+                # (x, y) coordinates, on the image, for the current MCU
+                mcu_y, mcu_x = divmod(current_mcu, self.mcu_count_h)
+                x, y = mcu_x * 8, mcu_y * 8
                 
                 # Loop through all color components
                 for depth, (component_id, component) in enumerate(my_color_components.items()):
@@ -679,10 +666,10 @@ class JpegDecoder():
                     
                     # Blocks of 8 x 8 pixels for the color component
                     for block_count in range(repeat):
-                        
-                        # Value index on the temporary storage
-                        index = 64 * current_mcu
-                        my_dct_values = self.progressive_dct_values[component_id]
+
+                        # Coordinates of the block on the current MCU
+                        block_y, block_x = divmod(block_count, component.horizontal_sampling)
+                        delta_y, delta_x = 8*block_y, 8*block_x
                         
                         # First scan of the DC values
                         if not refining:
@@ -695,8 +682,8 @@ class JpegDecoder():
                             dc_value = bin_twos_complement(next_bits(huffman_value)) + previous_dc[depth]
                             previous_dc[depth] = dc_value
                             
-                            # Store the partial DC value
-                            my_dct_values[index] = (dc_value << bit_position_low)
+                            # Store the partial DC value on the image array
+                            self.image_array[x+delta_x, y+delta_y, component.order] = (dc_value << bit_position_low)
                             """NOTE
                             'bit_position_low' is the position of the last value's bit sent in the scan.
                             So the partial value has its bits left-shifted by this amount.
@@ -705,7 +692,7 @@ class JpegDecoder():
                         # Refining scan for the DC values
                         else:
                             new_bit = int(next_bits())
-                            my_dct_values[index] |= (new_bit << bit_position_low)
+                            self.image_array[x+delta_x, y+delta_y, component.order] |= (new_bit << bit_position_low)
                             """NOTE
                             A refining scan of the DC values just sent the next bit of each value, in the
                             same order as the partial values were sent.
