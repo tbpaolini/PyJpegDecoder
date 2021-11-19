@@ -764,7 +764,7 @@ class JpegDecoder():
             to_refine = deque()     # Indexes of the band values that need to be refined
             
             # Define or update the band's values
-            while (index < band_length):
+            while (index < band_length - 1):
 
                 huffman_value = next_huffval()
                 eob_magnitute = huffman_value >> 4
@@ -845,6 +845,7 @@ class JpegDecoder():
                     refining_bits = next_bits(len(to_refine))
                     for ref_index, bit in zip(to_refine, refining_bits):
                         band[ref_index] |= int(bit) << bit_position_low
+                    to_refine.clear()
             
                 print(f"{index} / {band_length}")
                     
