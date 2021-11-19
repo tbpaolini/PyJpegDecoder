@@ -652,8 +652,8 @@ class JpegDecoder():
             while (current_mcu < self.mcu_count):
 
                 # (x, y) coordinates, on the image, for the current MCU
-                mcu_y, mcu_x = divmod(current_mcu, self.mcu_count_h)
-                x, y = mcu_x * 8, mcu_y * 8
+                x = (current_mcu % self.mcu_count_h) * 8
+                y = (current_mcu // self.mcu_count_h) * 8
                 
                 # Loop through all color components
                 for depth, (component_id, component) in enumerate(my_color_components.items()):
@@ -848,6 +848,20 @@ class JpegDecoder():
                     to_refine.clear()
             
                 print(f"{index} / {band_length}")
+            
+            # Place the MCU's back in the image array
+            """NOTE
+            We are not doing the zig-zag reordering just yet.
+            That will be done later, when performing the IDCT.
+            """
+            new_values = np.split(band, self.mcu_count)
+            for current_mcu in range(self.mcu_count):
+                x = (current_mcu % self.mcu_count_h) * 8
+                y = (current_mcu // self.mcu_count_h) * 8
+                
+                old_mcus[current_mcu].ravel()[spectral_selection_start : spectral_selection_end+1] = new_values[current_mcu]
+
+                self.image_array[x : x+8, y : y+8, component.order] = old_mcus[current_mcu]
                     
 
     def end_of_image(self, data:bytes) -> None:
