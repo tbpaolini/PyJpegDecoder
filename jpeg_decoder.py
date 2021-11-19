@@ -2,7 +2,7 @@ from PIL.ImageTk import PhotoImage
 import numpy as np
 from collections import deque, namedtuple
 from itertools import product
-from math import cos, pi
+from math import ceil, cos, pi
 from scipy.interpolate import griddata
 import tkinter as tk
 from typing import Callable, Tuple
@@ -348,8 +348,18 @@ class JpegDecoder():
         """
 
         # Amount of MCU's in the whole image (horizontal, vertical, and total)
-        self.mcu_count_h = (self.image_width // self.mcu_width) + (0 if self.image_width % self.mcu_width == 0 else 1)
-        self.mcu_count_v = (self.image_height // self.mcu_height) + (0 if self.image_height % self.mcu_height == 0 else 1)
+        if components_amount > 1:
+            self.mcu_count_h = (self.image_width // self.mcu_width) + (0 if self.image_width % self.mcu_width == 0 else 1)
+            self.mcu_count_v = (self.image_height // self.mcu_height) + (0 if self.image_height % self.mcu_height == 0 else 1)
+        else:
+            component = my_color_components[component_id]
+            sample_ratio_h = self.sample_shape[0] / component.shape[0]
+            sample_ratio_v = self.sample_shape[1] / component.shape[1]
+            layer_width = self.image_width / sample_ratio_h
+            layer_height = self.image_height / sample_ratio_v
+            self.mcu_count_h = ceil(layer_width / self.mcu_width)
+            self.mcu_count_v = ceil(layer_height / self.mcu_height)
+        
         self.mcu_count = self.mcu_count_h * self.mcu_count_v
 
         # Create the image array (if one does not exist already)
@@ -602,6 +612,7 @@ class JpegDecoder():
         The following scans of the same value send the next bits, in order, one bit per scan.
         Those scans are called "refining scans".
         """
+        print(f"\n-----\nCC: {', '.join(component.name for component in my_color_components.values())}\nSS: {spectral_selection_start}-{spectral_selection_end}\nSA: {bit_position_high}-{bit_position_low}")
 
         # Function to read the bits from the file's bytes
         next_bits = self.bits_generator()
@@ -852,12 +863,17 @@ class JpegDecoder():
                         if index == 0:
                             eob_run -= 1
                     
-                    while zero_run > 0:
-                        if band[current_mcu][index] == 0:
-                            zero_run -= 1
-                        else:
+                    if zero_run:
+                        while zero_run > 0:
+                            if band[current_mcu][index] == 0:
+                                zero_run -= 1
+                            else:
+                                to_refine.append((current_mcu, index))
+                            move_index(1)
+                        
+                        while band[current_mcu][index] != 0:
                             to_refine.append((current_mcu, index))
-                        move_index(1)
+                            move_index(1)
                     
                     """NOTE
                     During an AC refining scan, any non-zero values found during the EOB run
@@ -885,7 +901,11 @@ class JpegDecoder():
                         band[ref_mcu][ref_index] |= int(bit) << bit_position_low
                     to_refine.clear()
             
-                print(f"{current_mcu} / {self.mcu_count}", end="\r")
+                if refining and index != 0:
+                    current_mcu += 1
+                    index = 0
+                
+                print(f"{current_mcu}/{self.mcu_count}", end="\r")
             
             # Place the MCU's back in the image array
             """NOTE
