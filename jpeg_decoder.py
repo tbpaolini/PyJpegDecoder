@@ -710,14 +710,144 @@ class JpegDecoder():
 
         # AC values scan
         elif values == "ac":
+            """NOTE
+            This scan always has one color component, and the MCU always is 8x8 pixels.
+            All the AC values are considered to be in one contiguous band.
             
-            # First scan (AC)
-            if not refining:
-                pass
+            The band starts with the values specified on the spectral selection for the first MCU,
+            then those values for the next MCU, and so on until the whole image is covered.
+            
+            The order of the MCUs is: left-to-right starting from the top left, then top-to-bottom.
+            """
+            # Spectral selection
+            spectral_size = (spectral_selection_end + 1) - spectral_selection_start
+            
+            # Color component
+            (component_id, component), = my_color_components.items()
 
-            # Refining scan (AC)
-            else:
-                pass
+            # Huffman table
+            table_id = huffman_tables_id[component_id].ac
+            huffman_table:dict = self.huffman_tables[table_id]
+
+            # End of band run length
+            eob_run = 0
+            """NOTE
+            It is the amount of zero valued coeficients that the decoder has to skip on the band.
+            Non-zero values found during this run do not decrease the 'eob_run' counter.
+            """
+
+            # Band of AC values
+            band = deque()
+            old_mcus = deque()
+            for current_mcu in range(self.mcu_count):
+                # (x, y) coordinates, on the image, for the current MCU
+                mcu_y, mcu_x = divmod(current_mcu, self.mcu_count_h)
+                x, y = mcu_x * 8, mcu_y * 8
+
+                # 8 x 8 array for the current MCU values
+                mcu = self.image_array[x : x+8, y : y+8, component.order]
+                old_mcus.append(mcu)
+                
+                # Section of the band corresponding to the current MCU
+                my_section = mcu.ravel()[spectral_selection_start : spectral_selection_end+1]
+                band.extend(my_section)
+                """NOTE
+                - A 8x8 block is taken from the image array
+                - Then it is flattened to an 1D-array
+                - Afterwards it is cut to the spectral selection
+                - And finally the elements are added to the band
+                """
+            
+            band = np.array(band, dtype=self.image_array.dtype)
+            band_length = band.size
+            index = 0               # Index of the current value on the band
+            to_refine = deque()     # Indexes of the band values that need to be refined
+            
+            # Define or update the band's values
+            while (index < band_length):
+
+                huffman_value = next_huffval()
+                eob_magnitute = huffman_value >> 4
+                ac_bit_length = huffman_value & 0x0F
+
+                # Determine the new EOB run length
+                if (ac_bit_length == 0) and (eob_magnitute != 0xF):
+                    if eob_magnitute != 0:
+                        eob_bits = next_bits(eob_magnitute)
+                        eob_run = (2**eob_magnitute) + int(eob_bits, 2)
+                    else:
+                        eob_run = 1
+                else:
+                    eob_run = eob_magnitute
+                """NOTE
+                If the lower 4 bits of the Huffman value are not zero, a new AC coeficient will be made
+                non-zero for the first time. The next bits on the scan data are the first bits of the
+                AC coeficient (the amount of bits is the determined by those lower 4 bits of the HuffVal).
+                In this case, the upper 4 bits of the HuffVal determine by how much the zero_run counter
+                is increased (from 0 to 16).
+                
+                If the lower 4 bits of the Huffman value are 0000, then larger eob_run is defined. Here,
+                the upper 4 bits determine the amplitude (N) of the EOB run (2^N). Then the next N bits
+                on the data determine the length to be added to the EOB run. The end result:
+                EOB_run = 2^N + length
+                """
+
+                if ac_bit_length > 0:
+                    ac_bits = next_bits(ac_bit_length)
+                    ac_value = bin_twos_complement(ac_bits)
+                    
+                # Performing EOB run
+                if not refining:
+                    # First scan (AC)
+                    index += eob_run
+                    eob_run = 0
+                
+                else:
+                    # Refining scan (AC)
+                    while eob_run > 0:
+                        if band[index] == 0:
+                            eob_run -= 1
+                        else:
+                            to_refine.append(index)
+                        index += 1
+                    """NOTE
+                    During an AC refining scan, any non-zero values found during the EOB run
+                    are going to be refined.
+                    """
+
+                # Defining new AC values
+                if ac_bit_length > 0:
+                    if refining:
+                        # Refining scan (AC)
+                        """NOTE
+                        If the new defined value happens to fall in the place of an non-zero value,
+                        then the decoder will move the index until the next zero. The non-zero values
+                        found along the way will be refined.
+                        """
+                        while band[index] != 0:
+                            to_refine.append(index)
+                            index += 1
+
+                    band[index] = ac_value << bit_position_low
+                    index += 1
+                    """NOTE
+                    The first AC scan does not change much from how scans works in Baseline mode.
+                    The differences are that the zero run can go beyond the 8x8 block, and that
+                    the decoded value needs to has its bits shifted to the left by 'bit_position_low'.
+                    """
+                
+                # Refining existent AC values
+                """NOTE
+                Next on the data stream comes the next bits of the values that need to be
+                refined. One bit per value, in the order the values were found.
+                """
+                if to_refine:
+                    refining_bits = next_bits(len(to_refine))
+                    for ref_index, bit in zip(to_refine, refining_bits):
+                        band[ref_index] |= int(bit) << bit_position_low
+            
+                print(f"{index} / {band_length}")
+                    
 
     def end_of_image(self, data:bytes) -> None:
         
