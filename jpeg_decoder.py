@@ -759,15 +759,15 @@ class JpegDecoder():
             my_mcus = deque()
             for current_mcu in range(self.mcu_count):
                 # (x, y) coordinates, on the image, for the current MCU
-                mcu_y, mcu_x = divmod(current_mcu, self.mcu_count_h)
-                x, y = mcu_x * 8, mcu_y * 8
+                x = (current_mcu % self.mcu_count_h) * 8
+                y = (current_mcu // self.mcu_count_h) * 8
 
                 # 8 x 8 array for the current MCU values
-                mcu = self.image_array[x : x+8, y : y+8, component.order]
+                mcu = self.image_array[x : x+8, y : y+8, component.order].ravel()
                 my_mcus.append(mcu)
                 
                 # Band corresponding to the current MCU
-                my_band = mcu.ravel()[spectral_selection_start : spectral_selection_end+1]
+                my_band = mcu[spectral_selection_start : spectral_selection_end+1]
                 band.append(my_band)
                 """NOTE
                 - A 8x8 block is taken from the image array
@@ -911,9 +911,9 @@ class JpegDecoder():
                 x = (current_mcu % self.mcu_count_h) * 8
                 y = (current_mcu // self.mcu_count_h) * 8
                 
-                my_mcus[current_mcu].ravel()[spectral_selection_start : spectral_selection_end+1] = band[current_mcu]
+                my_mcus[current_mcu][spectral_selection_start : spectral_selection_end+1] = band[current_mcu]
 
-                self.image_array[x : x+8, y : y+8, component.order] = my_mcus[current_mcu]
+                self.image_array[x : x+8, y : y+8, component.order] = my_mcus[current_mcu].reshape(8, 8)
         
         # Check if all scans have been performed
         self.scan_count += 1
