@@ -748,172 +748,66 @@ class JpegDecoder():
             zero_run = 0
             """NOTE
             This is the amount of zero values to be skipped. If the run goes beyond
-            one band, it continues from the beginning of the next band.
+            one band, then the run is finished.
             
             On refining scans, the non-zero values found along the way will be
             refined (those values do not decrease the zero_run counter).
             """
 
-            # Band of AC values
-            band = deque()
-            my_mcus = deque()
-            for current_mcu in range(self.mcu_count):
-                # (x, y) coordinates, on the image, for the current MCU
+            # Decode the AC values
+            current_mcu = 0
+            while (current_mcu < self.mcu_count) and not refining:
+
+                # Coordinates of the MCU on the image
                 x = (current_mcu % self.mcu_count_h) * 8
                 y = (current_mcu // self.mcu_count_h) * 8
 
-                # 8 x 8 array for the current MCU values
-                mcu = self.image_array[x : x+8, y : y+8, component.order].ravel()
-                my_mcus.append(mcu)
-                
-                # Band corresponding to the current MCU
-                my_band = mcu[spectral_selection_start : spectral_selection_end+1]
-                band.append(my_band)
-                """NOTE
-                - A 8x8 block is taken from the image array
-                - Then it is flattened to an 1D-array
-                - Afterwards it is cut to the spectral selection
-                - And finally the elements are added to the band
-                """
-            
-            # List of bands
-            # (each band in a progressive scan corresponds to a single MCU)
-            band = list(band)
-            """NOTE
-            A Python list is faster to be navigated in arbitrary order, while a deque
-            is faster to have items appended or removed to either end of it.
-            That is why the band deque was converted to a list after everything has
-            been added to it.
-            """
-            
-            # Indexes of the band values that need to be refined
-            to_refine = deque()
-
-            # Index of a value within a band
-            index = 0
-            def move_index(amount:int) -> None:
-                """Increase the index value by a certain amount.
-                When the index goes beyond a band, it rolls over to the next band.
-                """
-                nonlocal index, current_mcu, spectral_size
-                index += amount
-                current_mcu += (index // spectral_size)
-                index = (index % spectral_size)
-            
-            # Define or update the band's values
-            current_mcu = 0
-            index = 0   # Index within a band
-            while (current_mcu < self.mcu_count):
-
-                huffman_value = next_huffval()
-                eob_magnitute = huffman_value >> 4
-                ac_bit_length = huffman_value & 0x0F
-
-                # Determine the new EOB run length
-                if (ac_bit_length == 0) and (eob_magnitute != 0xF):
-                    if eob_magnitute != 0:
-                        eob_bits = next_bits(eob_magnitute)
-                        eob_run = (2**eob_magnitute) + int(eob_bits, 2)
+                # Loop through the band
+                index = spectral_selection_start
+                while index <= spectral_selection_end:  # The element at the end of the band is included
+                    
+                    # Get the next Huffman value from the encoded data
+                    huffman_value = next_huffval()
+                    run_magnitute = huffman_value >> 4
+                    ac_bits_length = huffman_value & 0x0F
+                    
+                    # Determine the run length
+                    if huffman_value == 0:
+                        # End of band run of 1
+                        break
+                    elif (ac_bits_length == 0) and run_magnitute != 0xF:
+                        # End of band run (length determined by the next bits on the data)
+                        # (amount of bands to skip)
+                        eob_bits = next_bits(run_magnitute)
+                        eob_run = (1 << run_magnitute) + int(eob_bits, 2) - 1
+                        break
                     else:
-                        eob_run = 1
-                else:
-                    zero_run = eob_magnitute
-                """NOTE
-                If the lower 4 bits of the Huffman value are 0, a EOB RUN is defined. In this case,
-                the upper 4 bits determine the amplitude (N) of the EOB run (2^N). Then the next N bits
-                on the data determine the length to be added to the EOB run. The end result:
-                EOB_run = 2^N + length
-                """
-
-                if ac_bit_length > 0:
-                    ac_bits = next_bits(ac_bit_length)
-                    ac_value = bin_twos_complement(ac_bits)
+                        # Amount of zero values to skip
+                        zero_run = run_magnitute
                     
-                # Performing EOB run and zero run
+                    # Perform the zero run
+                    if (not refining) and zero_run:
+                        index += zero_run
+                        zero_run = 0
+                    
+                    # Decode the next AC value
+                    if ac_bits_length > 0:
+                        ac_bits = next_bits(ac_bits_length)
+                        ac_value = bin_twos_complement(ac_bits)
+                        
+                        # Store the AC value on the image array
+                        ac_x, ac_y = zagzig[index]
+                        self.image_array[x + ac_x, y + ac_y, component.order] = ac_value << bit_position_low
+                    
+                    # Move to the next value
+                    index += 1
+                
+                # Perform the end of band run and move to the next band
                 if not refining:
-                    # First scan (AC)
-                    if eob_run:
-                        current_mcu += eob_run
-                        eob_run = 0
-                        index = 0
-                    
-                    if zero_run:
-                        move_index(zero_run)
-                    
-                    """NOTE
-                    If the image has been encoded properly, a zero run and an EOB run will never
-                    happen both at the same time.
-                    """
-                
-                else:
-                    # Refining scan (AC)
-                    while eob_run > 0:
-                        
-                        # If the skipped value is not zero, it is going to be refined
-                        if band[current_mcu][index] != 0:
-                            to_refine.append((current_mcu, index))
-                        move_index(1)
-                        
-                        # If we have reached the end of the band
-                        if index == 0:
-                            eob_run -= 1
-                    
-                    if zero_run:
-                        while zero_run > 0:
-                            if band[current_mcu][index] == 0:
-                                zero_run -= 1
-                            else:
-                                to_refine.append((current_mcu, index))
-                            move_index(1)
-                        
-                        while band[current_mcu][index] != 0:
-                            to_refine.append((current_mcu, index))
-                            move_index(1)
-                    
-                    """NOTE
-                    During an AC refining scan, any non-zero values found during the EOB run
-                    or the zero run are going to be refined.
-                    """
-
-                # Defining new AC values
-                if ac_bit_length > 0:
-                    band[current_mcu][index] = ac_value << bit_position_low
-                    move_index(1)
-                    """NOTE
-                    The first AC scan does not change much from how scans works in Baseline mode.
-                    The differences are that the zero run can go beyond the 8x8 block, and that
-                    the decoded value needs to has its bits shifted to the left by 'bit_position_low'.
-                    """
-                
-                # Refining existent AC values
-                """NOTE
-                Next on the data stream comes the next bits of the values that need to be
-                refined. One bit per value, in the order the values were found.
-                """
-                if to_refine:
-                    refining_bits = next_bits(len(to_refine))
-                    for (ref_mcu, ref_index), bit in zip(to_refine, refining_bits):
-                        band[ref_mcu][ref_index] |= int(bit) << bit_position_low
-                    to_refine.clear()
-            
-                if refining and index != 0:
-                    current_mcu += 1
-                    index = 0
+                    current_mcu += eob_run + 1
+                    eob_run = 0
                 
                 print(f"{current_mcu}/{self.mcu_count}", end="\r")
-            
-            # Place the MCU's back in the image array
-            """NOTE
-            We are not doing the zig-zag reordering just yet.
-            That will be done later, when performing the IDCT.
-            """
-            for current_mcu in range(self.mcu_count):
-                x = (current_mcu % self.mcu_count_h) * 8
-                y = (current_mcu // self.mcu_count_h) * 8
-                
-                my_mcus[current_mcu][spectral_selection_start : spectral_selection_end+1] = band[current_mcu]
-
-                self.image_array[x : x+8, y : y+8, component.order] = my_mcus[current_mcu].reshape(8, 8)
         
         # Check if all scans have been performed
         self.scan_count += 1
@@ -939,19 +833,24 @@ class JpegDecoder():
                 mcu_count_v = component_height // 8
                 mcu_count = mcu_count_h * mcu_count_v
 
-                # Undo the zig-zag order and perdorm the inverse discrete cosine transform (IDCT)
+                # Perform the inverse discrete cosine transform (IDCT)
                 print()
                 for current_mcu in range(mcu_count):
                     
+                    # Get coordinates of the block
                     x = (current_mcu % mcu_count_h) * 8
                     y = (current_mcu // mcu_count_h) * 8
 
+                    # Undo quantization on the block
                     block = self.image_array[x : x+8, y : y+8, component.order]
-                    block = undo_zigzag(block.ravel()) * quantization_table
+                    block *= quantization_table
+
+                    # Perform IDCT on the block to get the color values
                     block = idct(block.reshape(8, 8))
                     self.image_array[x : x+8, y : y+8, component.order] = block
 
                     print(f"IDCT: {current_mcu}/{mcu_count}", end="\r")
+                print()
                 
                 # Upsample the subsampled color components
                 if (component_width != self.array_width) or (component_height != self.array_height):
@@ -1158,6 +1057,20 @@ def undo_zigzag(block:np.ndarray) -> np.ndarray:
     array[x, y] = value on that pixel position
     """
 
+# List that undoes the zig-zag ordering for a single element in a band
+# (the element index is used on the list, and it returns a (x, y) tuple
+# for the coordinates on the data unit)
+zagzig = (
+    (0, 0), (1, 0), (0, 1), (0, 2), (1, 1), (2, 0), (3, 0), (2, 1),
+    (1, 2), (0, 3), (0, 4), (1, 3), (2, 2), (3, 1), (4, 0), (5, 0),
+    (4, 1), (3, 2), (2, 3), (1, 4), (0, 5), (0, 6), (1, 5), (2, 4),
+    (3, 3), (4, 2), (5, 1), (6, 0), (7, 0), (6, 1), (5, 2), (4, 3),
+    (3, 4), (2, 5), (1, 6), (0, 7), (1, 7), (2, 6), (3, 5), (4, 4),
+    (5, 3), (6, 2), (7, 1), (7, 2), (6, 3), (5, 4), (4, 5), (3, 6),
+    (2, 7), (3, 7), (4, 6), (5, 5), (6, 4), (7, 3), (7, 4), (6, 5),
+    (5, 6), (4, 7), (5, 7), (6, 6), (7, 5), (7, 6), (6, 7), (7, 7)
+)
+
 def YCbCr_to_RGB(image_array:np.ndarray) -> np.ndarray:
     """Takes a 3-dimensional array representing an image in the YCbCr color
     space, and returns an array of the image in the RGB color space:
@@ -1198,6 +1111,7 @@ class UnsupportedJpeg(JpegError):
 
 if __name__ == "__main__":
     jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago.jpg")
+    # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (4).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (3).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg")
