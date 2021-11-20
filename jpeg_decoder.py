@@ -3,6 +3,7 @@ import numpy as np
 from collections import deque, namedtuple
 from itertools import product
 from math import ceil, cos, pi
+from numpy.core.records import array
 from scipy.interpolate import griddata
 import tkinter as tk
 from typing import Callable, Tuple
@@ -62,7 +63,7 @@ class JpegDecoder():
         self.quantization_tables = {}   # Hold all quantization tables
         self.restart_interval = 0       # How many MCU's before each restart marker
         self.image_array = None         # Store the color values for each pixel of the image
-        self.progressive_dct_completed = None   # Which values have been fully decoded in a progressive scan
+        self.scan_count = 0             # Counter for the performed scans
 
         # Main loop to find and process the supported file segments
         """NOTE
@@ -373,9 +374,9 @@ class JpegDecoder():
             self.array_depth = len(self.color_components)
             self.image_array = np.zeros(shape=(self.array_width, self.array_height, self.array_depth), dtype="int16")
         
-        # Create arrays to store temporarily the data for a progressive scan
-        if (self.scan_mode == "progressive_dct") and (self.progressive_dct_completed is None):
-            self.progressive_dct_completed = np.zeros(shape=(8, 8, self.array_depth), dtype="bool")
+        # Setup scan counter
+        if self.scan_count == 0:
+            self.scan_amount = self.raw_file[self.file_header:].count(SOS) + 1
 
         # Begin the scan of the entropy encoded segment
         if self.scan_mode == "baseline_dct":
@@ -630,12 +631,6 @@ class JpegDecoder():
             
             return huffman_value
 
-        # Function to perform the inverse discrete cosine transform (IDCT)
-        idct = InverseDCT()
-
-        # Function to resize a block of color values
-        resize = ResizeGrid()
-
         # Beginning of scan
         current_mcu = 0
         components_amount = len(my_color_components)
@@ -661,13 +656,13 @@ class JpegDecoder():
                 previous_dc = np.zeros(components_amount, dtype="int16")
 
             while (current_mcu < self.mcu_count):
-
-                # (x, y) coordinates, on the image, for the current MCU
-                x = (current_mcu % self.mcu_count_h) * 8
-                y = (current_mcu // self.mcu_count_h) * 8
                 
                 # Loop through all color components
                 for depth, (component_id, component) in enumerate(my_color_components.items()):
+
+                    # (x, y) coordinates, on the image, for the current MCU
+                    x = (current_mcu % self.mcu_count_h) * component.shape[0]
+                    y = (current_mcu // self.mcu_count_h) * component.shape[1]
 
                     # Minimum coding unit (MCU) of the component
                     if components_amount > 1:
@@ -919,7 +914,49 @@ class JpegDecoder():
                 my_mcus[current_mcu].ravel()[spectral_selection_start : spectral_selection_end+1] = band[current_mcu]
 
                 self.image_array[x : x+8, y : y+8, component.order] = my_mcus[current_mcu]
+        
+        # Check if all scans have been performed
+        self.scan_count += 1
+        if self.scan_count == self.scan_amount:
+
+            # Function to perform the inverse discrete cosine transform (IDCT)
+            idct = InverseDCT()
+
+            # Function to resize a block of color values
+            resize = ResizeGrid()
+            
+            # Reorder and perform the IDCT once all scans have finished
+            for component in self.color_components.values():
+                quantization_table = self.quantization_tables[component.quantization_table_id]
+
+                ratio_h = self.sample_shape[0] // component.shape[0]
+                ratio_v = self.sample_shape[1] // component.shape[1]
+                component_width = self.array_width // ratio_h
+                component_height = self.array_height // ratio_v
+                image_shape = (self.array_width, self.array_height)
+
+                mcu_count_h = component_width // 8
+                mcu_count_v = component_height // 8
+                mcu_count = mcu_count_h * mcu_count_v
+
+                # Undo the zig-zag order and perdorm the inverse discrete cosine transform (IDCT)
+                print()
+                for current_mcu in range(mcu_count):
                     
+                    x = (current_mcu % mcu_count_h) * 8
+                    y = (current_mcu // mcu_count_h) * 8
+
+                    block = self.image_array[x : x+8, y : y+8, component.order]
+                    block = undo_zigzag(block.ravel()) * quantization_table
+                    block = idct(block.reshape(8, 8))
+                    self.image_array[x : x+8, y : y+8, component.order] = block
+
+                    print(f"IDCT: {current_mcu}/{mcu_count}", end="\r")
+                
+                # Upsample the subsampled color components
+                if (component_width != self.array_width) or (component_height != self.array_height):
+                    layer = self.image_array[0 : component_width, 0 : component_height, component.order]
+                    self.image_array[..., component.order] = resize(layer, image_shape)
 
     def end_of_image(self, data:bytes) -> None:
         
@@ -999,6 +1036,8 @@ class JpegDecoder():
         )
 
         # Open the window
+        # from skimage import io
+        # io.imsave("Teste 2.bmp", np.swapaxes(self.image_array, 0, 1))
         window.mainloop()
 
     def show2(self):
