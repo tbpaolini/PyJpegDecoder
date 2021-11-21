@@ -824,7 +824,8 @@ class JpegDecoder():
             # Function to resize a block of color values
             resize = ResizeGrid()
             
-            # Reorder and perform the IDCT once all scans have finished
+            # Perform the IDCT once all scans have finished
+            dct_array = self.image_array.copy()
             for component in self.color_components.values():
                 quantization_table = self.quantization_tables[component.quantization_table_id]
 
@@ -832,7 +833,6 @@ class JpegDecoder():
                 ratio_v = self.sample_shape[1] // component.shape[1]
                 component_width = self.array_width // ratio_h
                 component_height = self.array_height // ratio_v
-                image_shape = (self.array_width, self.array_height)
 
                 mcu_count_h = component_width // 8
                 mcu_count_v = component_height // 8
@@ -843,24 +843,30 @@ class JpegDecoder():
                 for current_mcu in range(mcu_count):
                     
                     # Get coordinates of the block
-                    x = (current_mcu % mcu_count_h) * 8
-                    y = (current_mcu // mcu_count_h) * 8
+                    x1 = (current_mcu % mcu_count_h) * 8
+                    y1 = (current_mcu // mcu_count_h) * 8
+                    x2 = x1 + 8
+                    y2 = y1 + 8
 
                     # Undo quantization on the block
-                    block = self.image_array[x : x+8, y : y+8, component.order]
+                    block = dct_array[x1 : x2, y1 : y2, component.order]
                     block *= quantization_table
 
                     # Perform IDCT on the block to get the color values
                     block = idct(block.reshape(8, 8))
-                    self.image_array[x : x+8, y : y+8, component.order] = block
 
-                    print(f"IDCT: {current_mcu}/{mcu_count}", end="\r")
+                    # Upsample the block if necessary
+                    if component.shape != self.sample_shape:
+                        block = resize(block, self.sample_shape)
+                        x1 *= ratio_h
+                        y1 *= ratio_v
+                        x2 *= ratio_h
+                        y2 *= ratio_v
+                    
+                    self.image_array[x1 : x2, y1 : y2, component.order] = block
+
+                    print(f"IDCT: {current_mcu+1}/{mcu_count}", end="\r")
                 print()
-                
-                # Upsample the subsampled color components
-                if (component_width != self.array_width) or (component_height != self.array_height):
-                    layer = self.image_array[0 : component_width, 0 : component_height, component.order]
-                    self.image_array[..., component.order] = resize(layer, image_shape)
 
     def end_of_image(self, data:bytes) -> None:
         
