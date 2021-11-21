@@ -774,12 +774,13 @@ class JpegDecoder():
                     # Determine the run length
                     if huffman_value == 0:
                         # End of band run of 1
+                        eob_run = 1
                         break
                     elif (ac_bits_length == 0) and run_magnitute != 0xF:
                         # End of band run (length determined by the next bits on the data)
                         # (amount of bands to skip)
                         eob_bits = next_bits(run_magnitute)
-                        eob_run = (1 << run_magnitute) + int(eob_bits, 2) - 1
+                        eob_run = (1 << run_magnitute) + int(eob_bits, 2)
                         break
                     else:
                         # Amount of zero values to skip
@@ -802,9 +803,13 @@ class JpegDecoder():
                     # Move to the next value
                     index += 1
                 
-                # Perform the end of band run and move to the next band
+                # Move to the next band if we are at the end of a band
+                if index > spectral_selection_end:
+                    current_mcu += 1
+
+                # Perform the end of band run
                 if not refining:
-                    current_mcu += eob_run + 1
+                    current_mcu += eob_run
                     eob_run = 0
                 
                 print(f"{current_mcu}/{self.mcu_count}", end="\r")
