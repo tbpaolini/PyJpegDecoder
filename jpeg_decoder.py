@@ -759,10 +759,12 @@ class JpegDecoder():
                 nonlocal to_refine, next_bits, bit_position_low, component
                 
                 refine_bits = next_bits(len(to_refine))
+                ref_index = 0
                 while to_refine:
-                    ref_index, ref_x, ref_y = to_refine.popleft()
+                    ref_x, ref_y = to_refine.popleft()
                     new_bit = int(refine_bits[ref_index], 2)
                     self.image_array[ref_x, ref_y, component.order] |= new_bit << bit_position_low
+                    ref_index += 1
 
             # Decode the AC values
             current_mcu = 0
@@ -802,7 +804,6 @@ class JpegDecoder():
                         index += zero_run
                         zero_run = 0
                     else:
-                        ref_count = 0
                         while zero_run > 0:         # Refining scan
                             xr, yr = zagzig[index]
                             current_value = self.image_array[x + xr, y + yr, component.order]
@@ -810,8 +811,7 @@ class JpegDecoder():
                             if current_value == 0:
                                 zero_run -= 1
                             else:
-                                to_refine.append((ref_count, x + xr, y + yr))
-                                ref_count += 1
+                                to_refine.append((x + xr, y + yr))
                             
                             index += 1
                             # if index > spectral_selection_end:
@@ -829,8 +829,7 @@ class JpegDecoder():
                         # (the index is moved until a zero is found, other values along the way will be refined)
                         if refining:
                             while self.image_array[x + ac_x, y + ac_y, component.order] != 0:
-                                to_refine.append((ref_count, x + ac_x, y + ac_y))
-                                ref_count += 1
+                                to_refine.append((x + ac_x, y + ac_y))
                                 index += 1
                                 ac_x, ac_y = zagzig[index]
                         
@@ -858,14 +857,12 @@ class JpegDecoder():
                     eob_run = 0
                 
                 else:                       # Refining scan
-                    ref_count = 0
                     while eob_run > 0:
                         xr, yr = zagzig[index]
                         current_value = self.image_array[x + xr, y + yr, component.order]
                         
                         if current_value != 0:
-                            to_refine.append((ref_count, x + xr, y + yr))
-                            ref_count += 1
+                            to_refine.append((x + xr, y + yr))
                         
                         index += 1
                         if index > spectral_selection_end:
