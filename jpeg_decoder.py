@@ -789,7 +789,9 @@ class JpegDecoder():
                         # End of band run of 1
                         eob_run = 1
                         break
-                    elif (ac_bits_length == 0) and run_magnitute != 0xF:
+                    elif huffman_value == 0xF0:
+                        zero_run = 16
+                    elif (ac_bits_length == 0):
                         # End of band run (length determined by the next bits on the data)
                         # (amount of bands to skip)
                         eob_bits = next_bits(run_magnitute)
@@ -835,13 +837,13 @@ class JpegDecoder():
                         
                         # Create a new ac_value
                         self.image_array[x + ac_x, y + ac_y, component.order] = ac_value << bit_position_low
+                        
+                        # Move to the next value
+                        index += 1
                     
                     # Refine AC values skipped by the zero run
                     if refining:
                         refine_ac()
-                    
-                    # Move to the next value
-                    index += 1
                 
                 # Move to the next band if we are at the end of a band
                 if index > spectral_selection_end:
