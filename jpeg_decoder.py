@@ -1,11 +1,8 @@
-from PIL.ImageTk import PhotoImage
 import numpy as np
 from collections import deque, namedtuple
 from itertools import product
 from math import ceil, cos, pi
-from numpy.core.records import array
 from scipy.interpolate import griddata
-import tkinter as tk
 from typing import Callable, Tuple
 
 # JPEG markers (for our supported segments)
@@ -1195,7 +1192,6 @@ class UnsupportedJpeg(JpegError):
 
 if __name__ == "__main__":
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago.jpg")
-    jpeg = JpegDecoder(r"Tiago.jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (4).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (3).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
