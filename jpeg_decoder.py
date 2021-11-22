@@ -950,6 +950,9 @@ class JpegDecoder():
         # Convert image from YCbCr to RGB
         if (self.array_depth == 3):
             self.image_array = YCbCr_to_RGB(self.image_array)
+        elif (self.array_depth == 1):
+            np.clip(self.image_array, a_min=0, a_max=255, out=self.image_array)
+            self.image_array = self.image_array[..., 0].astype("uint8")
         
         self.scan_finished = True
         self.show()
