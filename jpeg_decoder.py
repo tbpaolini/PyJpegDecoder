@@ -754,9 +754,20 @@ class JpegDecoder():
             refined (those values do not decrease the zero_run counter).
             """
 
+            # Refining function
+            def refine_ac() -> None:
+                nonlocal to_refine, next_bits, bit_position_low, component
+                
+                refine_bits = next_bits(len(to_refine))
+                while to_refine:
+                    ref_index, ref_x, ref_y = to_refine.popleft()
+                    new_bit = int(refine_bits[ref_index], 2)
+                    self.image_array[ref_x, ref_y, component.order] |= new_bit << bit_position_low
+
             # Decode the AC values
             current_mcu = 0
-            while (current_mcu < self.mcu_count) and not refining:
+            to_refine = deque()
+            while (current_mcu < self.mcu_count):
 
                 # Coordinates of the MCU on the image
                 x = (current_mcu % self.mcu_count_h) * 8
@@ -787,9 +798,24 @@ class JpegDecoder():
                         zero_run = run_magnitute
                     
                     # Perform the zero run
-                    if (not refining) and zero_run:
+                    if not refining and zero_run:   # First scan
                         index += zero_run
                         zero_run = 0
+                    else:
+                        ref_count = 0
+                        while zero_run > 0:         # Refining scan
+                            xr, yr = zagzig[index]
+                            current_value = self.image_array[x + xr, y + yr, component.order]
+                            
+                            if current_value == 0:
+                                zero_run -= 1
+                            else:
+                                to_refine.append((ref_count, x + xr, y + yr))
+                                ref_count += 1
+                            
+                            index += 1
+                            # if index > spectral_selection_end:
+                            #     break
                     
                     # Decode the next AC value
                     if ac_bits_length > 0:
@@ -798,7 +824,22 @@ class JpegDecoder():
                         
                         # Store the AC value on the image array
                         ac_x, ac_y = zagzig[index]
+
+                        # In order to create a new AC value, the decoder needs to be at a zero value
+                        # (the index is moved until a zero is found, other values along the way will be refined)
+                        if refining:
+                            while self.image_array[x + ac_x, y + ac_y, component.order] != 0:
+                                to_refine.append((ref_count, x + ac_x, y + ac_y))
+                                ref_count += 1
+                                index += 1
+                                ac_x, ac_y = zagzig[index]
+                        
+                        # Create a new ac_value
                         self.image_array[x + ac_x, y + ac_y, component.order] = ac_value << bit_position_low
+                    
+                    # Refine AC values skipped by the zero run
+                    if refining:
+                        refine_ac()
                     
                     # Move to the next value
                     index += 1
@@ -806,11 +847,41 @@ class JpegDecoder():
                 # Move to the next band if we are at the end of a band
                 if index > spectral_selection_end:
                     current_mcu += 1
+                    if refining:
+                        # Coordinates of the MCU on the image
+                        x = (current_mcu % self.mcu_count_h) * 8
+                        y = (current_mcu // self.mcu_count_h) * 8
 
                 # Perform the end of band run
-                if not refining:
+                if not refining:            # First scan
                     current_mcu += eob_run
                     eob_run = 0
+                
+                else:                       # Refining scan
+                    ref_count = 0
+                    while eob_run > 0:
+                        xr, yr = zagzig[index]
+                        current_value = self.image_array[x + xr, y + yr, component.order]
+                        
+                        if current_value != 0:
+                            to_refine.append((ref_count, x + xr, y + yr))
+                            ref_count += 1
+                        
+                        index += 1
+                        if index > spectral_selection_end:
+                            
+                            # Move to the next band
+                            eob_run -= 1
+                            current_mcu += 1
+                            index = spectral_selection_start
+                            
+                            # Coordinates of the MCU on the image
+                            x = (current_mcu % self.mcu_count_h) * 8
+                            y = (current_mcu // self.mcu_count_h) * 8
+                
+                # Refine the AC values found during the EOB run
+                if refining:
+                    refine_ac()
                 
                 print(f"{current_mcu}/{self.mcu_count}", end="\r")
         
@@ -1121,7 +1192,8 @@ class UnsupportedJpeg(JpegError):
 # Run script
 
 if __name__ == "__main__":
-    jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago.jpg")
+    # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago.jpg")
+    jpeg = JpegDecoder(r"Tiago.jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (4).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (3).jpg")
     # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
