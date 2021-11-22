@@ -709,7 +709,8 @@ class JpegDecoder():
                 # Check for restart interval
                 if (self.restart_interval > 0) and (current_mcu % self.restart_interval == 0) and (current_mcu != self.mcu_count):
                     next_bits(amount=0, restart=True)
-                    previous_dc[:] = 0
+                    if not refining:
+                        previous_dc[:] = 0
 
         # AC values scan
         elif values == "ac":
@@ -880,6 +881,10 @@ class JpegDecoder():
                     refine_ac()
                 
                 print(f"{current_mcu}/{self.mcu_count}", end="\r")
+
+                 # Check for restart interval
+                if (self.restart_interval > 0) and (current_mcu % self.restart_interval == 0) and (current_mcu != self.mcu_count):
+                    next_bits(amount=0, restart=True)
         
         # Check if all scans have been performed
         self.scan_count += 1
