@@ -754,9 +754,15 @@ class JpegDecoder():
 
             # Refining function
             def refine_ac() -> None:
+                """Perform the refinement of the AC values on a progressive scan
+                """
                 nonlocal to_refine, next_bits, bit_position_low, component
                 
+                # Fetch the bits that will be used to refine the AC values
+                # (the bits come in the same order that the values to be refined were found)
                 refine_bits = next_bits(len(to_refine))
+
+                # Refine the AC values
                 ref_index = 0
                 while to_refine:
                     ref_x, ref_y = to_refine.popleft()
@@ -764,9 +770,11 @@ class JpegDecoder():
                     self.image_array[ref_x, ref_y, component.order] |= new_bit << bit_position_low
                     ref_index += 1
 
-            # Decode the AC values
-            current_mcu = 0
+            # Queue of AC values that will be refined
             to_refine = deque()
+
+            # Decode and refine the AC values
+            current_mcu = 0
             while (current_mcu < self.mcu_count):
 
                 # Coordinates of the MCU on the image
@@ -795,14 +803,39 @@ class JpegDecoder():
                         eob_bits = next_bits(run_magnitute)
                         eob_run = (1 << run_magnitute) + int(eob_bits, 2)
                         break
+                        """NOTE (EOB run)
+                        If the upper lower of the Huffman value is 0x0, and the upper nibble is from 0x0 to 0xE,
+                        then a End of Band Run (EOB run) is defined. The EOB run tells the decoder how many
+                        bands to skip.
+
+                        This amount is determined by the Huffman value and the bits following it. The upper nibble
+                        of the Huffman value determines the amplitude (N) of the EOB run (2^N). Then the next N bits
+                        on the data (following the Huffman value) determine the length to be added to the EOB run.
+                        Those bits are converted from binary to decimal and added to 2^N:
+                        EOB run = 2^N + length
+                        """
                     else:
                         # Amount of zero values to skip
                         zero_run = run_magnitute
+                        """NOTE (Zero run)
+                        If the lower nibble of the Huffman value greater than 0x0 (except for 0xF0), then a zero run
+                        is defined. The zero run is the amount of zero values to skip within a band. This amount is
+                        determined directly by the value of the upper nibble of the Huffman value.
+                        
+                        The lower nibble determines the bit-length (N) of the next non-zero AC value.
+                        The next N bits on the data (following the Huffman value) are the next AC value,
+                        in a binary two's complement representation.
+
+                        A Huffman value of 0xF0 defines a zero run of length 16, with no AC value bits following it.
+                        """
                     
                     # Perform the zero run
                     if not refining and zero_run:   # First scan
                         index += zero_run
                         zero_run = 0
+                        """NOTE
+                        On the first scan, all AC values skipped are considered to be zero.
+                        """
                     else:
                         while zero_run > 0:         # Refining scan
                             xr, yr = zagzig[index]
@@ -814,8 +847,11 @@ class JpegDecoder():
                                 to_refine.append((x + xr, y + yr))
                             
                             index += 1
-                            # if index > spectral_selection_end:
-                            #     break
+                            """NOTE
+                            On a refining scan, only the zero AC values decrease the zero run counter.
+                            The decoder keeps moving to the next AC value until the counter is depleted.
+                            The non-zero values found along the way are enqueued to be refined.
+                            """
                     
                     # Decode the next AC value
                     if ac_bits_length > 0:
@@ -823,6 +859,7 @@ class JpegDecoder():
                         ac_value = bin_twos_complement(ac_bits)
                         
                         # Store the AC value on the image array
+                        # (the zig-zag scan order is undone to find the position of the value on the image)
                         ac_x, ac_y = zagzig[index]
 
                         # In order to create a new AC value, the decoder needs to be at a zero value
@@ -832,6 +869,13 @@ class JpegDecoder():
                                 to_refine.append((x + ac_x, y + ac_y))
                                 index += 1
                                 ac_x, ac_y = zagzig[index]
+                                """NOTE
+                                On a refining scan, when the lower nibble of the Huffman value is not zero
+                                then a new AC value is created. However the new AC value cannot be created
+                                in the spot where there is an existing AC value. So if the decoder happens
+                                to be at a non-zero AC value, then it moves to the next spot until a zero
+                                is found. The non-zero values found along the way are enqueued to be refined.
+                                """
                         
                         # Create a new ac_value
                         self.image_array[x + ac_x, y + ac_y, component.order] = ac_value << bit_position_low
@@ -842,6 +886,11 @@ class JpegDecoder():
                     # Refine AC values skipped by the zero run
                     if refining:
                         refine_ac()
+                        """NOTE
+                        Following the bits of the AC value (on the image data), come the bits of all
+                        values enqueued to be refined. One bit per value, in the same order the values
+                        were found. So if N values are going to be refined, then N bits will follow.
+                        """
                 
                 # Move to the next band if we are at the end of a band
                 if index > spectral_selection_end:
@@ -855,6 +904,12 @@ class JpegDecoder():
                 if not refining:            # First scan
                     current_mcu += eob_run
                     eob_run = 0
+                    """NOTE
+                    In the first scan, all the skipped AC values are consideded to be zero.
+                    If the EOB run is called when a band has been partially processed, then
+                    only the remaining values on the band are considered zero (this band
+                    stills count for the EOB run counter).
+                    """
                 
                 else:                       # Refining scan
                     while eob_run > 0:
@@ -875,18 +930,34 @@ class JpegDecoder():
                             # Coordinates of the MCU on the image
                             x = (current_mcu % self.mcu_count_h) * 8
                             y = (current_mcu // self.mcu_count_h) * 8
+                    """NOTE
+                    On a refining scan, the non-zero values that were skipped are enqueued
+                    to be refined. If the EOB run begins on a partially processed band, then
+                    only the remaining values on the band are considered (this band still
+                    decreases the EOB run counter).
+                    """
                 
                 # Refine the AC values found during the EOB run
                 if refining:
                     refine_ac()
+                    """NOTE
+                    On the image data stream, the bits following the Huffman value that defined
+                    an EOB run will be used to refine the non-zero AC values that were skipped
+                    during the run. If N non-zero values were skipped, then N bits will follow
+                    to refine them. One bit per value, in the same order the values were found.
+                    """
                 
                 print(f"{current_mcu}/{self.mcu_count}", end="\r")
 
                  # Check for restart interval
                 if (self.restart_interval > 0) and (current_mcu % self.restart_interval == 0) and (current_mcu != self.mcu_count):
                     next_bits(amount=0, restart=True)
+                    """NOTE
+                    When a restart interval is reashed, then the decoder moves to the next byte
+                    boundary (if not already at one), and then jumps over the restart marker (2 bytes long).
+                    """
         
-        # Check if all scans have been performed
+        # Check if all scans have been performed and perform the IDCT
         self.scan_count += 1
         if self.scan_count == self.scan_amount:
 
