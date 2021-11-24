@@ -4,3 +4,4 @@ __pycache__/
 **/*.jfif
 tests/
 literature/
+!progressive scan example/*

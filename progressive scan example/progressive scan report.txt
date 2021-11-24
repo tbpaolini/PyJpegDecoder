@@ -1,0 +1,67 @@
+Scan 1
+Color components: Y, Cb, Cr
+Spectral selection: 0-0
+Successive approximation: 0-1
+
+-----
+
+Scan 2
+Color components: Y
+Spectral selection: 1-5
+Successive approximation: 0-2
+
+-----
+
+Scan 3
+Color components: Cr
+Spectral selection: 1-63
+Successive approximation: 0-1
+
+-----
+
+Scan 4
+Color components: Cb
+Spectral selection: 1-63
+Successive approximation: 0-1
+
+-----
+
+Scan 5
+Color components: Y
+Spectral selection: 6-63
+Successive approximation: 0-2
+
+-----
+
+Scan 6
+Color components: Y
+Spectral selection: 1-63
+Successive approximation: 2-1
+
+-----
+
+Scan 7
+Color components: Y, Cb, Cr
+Spectral selection: 0-0
+Successive approximation: 1-0
+
+-----
+
+Scan 8
+Color components: Cr
+Spectral selection: 1-63
+Successive approximation: 1-0
+
+-----
+
+Scan 9
+Color components: Cb
+Spectral selection: 1-63
+Successive approximation: 1-0
+
+-----
+
+Scan 10
+Color components: Y
+Spectral selection: 1-63
+Successive approximation: 1-0
