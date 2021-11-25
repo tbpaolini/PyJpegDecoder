@@ -1154,7 +1154,13 @@ class JpegDecoder():
         try:
             my_image.save(img_path)
         except ValueError:
-            my_image.save(img_path.with_suffix("png"), format="png")
+            img_path = img_path.with_suffix(".png")
+            count = 1
+            my_stem = img_path.stem
+            while img_path.exists():
+                img_path = img_path.with_stem(f"{my_stem} ({count})")
+                count += 1
+            my_image.save(img_path, format="png")
 
 
 class InverseDCT():
@@ -1323,31 +1329,35 @@ if __name__ == "__main__":
         dialog = False
 
     # Get the JPEG file path
+    # If a path was provided as a command line argument, then use it
+    if len(argv) > 1:
+        jpeg_path = Path(argv[1])
+        command = True
+    else:
+        command = False
+    
     while True:
-
-        # If a path was provided as a command line argument, then use it
-        if len(argv) > 1:
-            jpeg_path = Path(argv[1])
         
         # Open a dialog to ask the user for a image path
-        elif dialog:
-            window = tk.Tk()
-            window.state("withdrawn")
-            jpeg_path = Path(
-                askopenfilename(
-                    master = None,
-                    title = "Decode a JPEG image",
-                    filetypes = (
-                        ("JPEG images", "*.jpg *.jpeg *.jfif *.jpe *.jif *.jfi"),
-                        ("All files", "*.*")
+        if not command:
+            if dialog:
+                window = tk.Tk()
+                window.state("withdrawn")
+                jpeg_path = Path(
+                    askopenfilename(
+                        master = None,
+                        title = "Decode a JPEG image",
+                        filetypes = (
+                            ("JPEG images", "*.jpg *.jpeg *.jfif *.jpe *.jif *.jfi"),
+                            ("All files", "*.*")
+                        )
                     )
                 )
-            )
-            window.destroy()
-        
-        # If no GUI is available, then use the command prompt to ask the user for a path
-        else:
-            jpeg_path = Path(input("JPEG path: "))
+                window.destroy()
+            
+            # If no GUI is available, then use the command prompt to ask the user for a path
+            else:
+                jpeg_path = Path(input("JPEG path: "))
         
         # Check if the provided path exists
         if jpeg_path.exists():
@@ -1355,8 +1365,8 @@ if __name__ == "__main__":
         
         # Ask the user to try again if the path does not exist
         else:
-            argv.clear()
-            print(f"'{jpeg_path.name}' was not found on '{jpeg_path.parent}'")
+            command = False
+            print(f"File '{jpeg_path.name}' was not found on '{jpeg_path.parent.resolve()}'")
             
             # Ask yes or no
             while True:
