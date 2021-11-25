@@ -3,7 +3,8 @@ from collections import deque, namedtuple
 from itertools import product
 from math import ceil, cos, pi
 from scipy.interpolate import griddata
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Union
+from pathlib import Path
 
 # JPEG markers (for our supported segments)
 SOI  = bytes.fromhex("FFD8")    # Start of image
@@ -1067,6 +1068,13 @@ class JpegDecoder():
         )
         scrollbar_h["command"] = canvas.xview
         scrollbar_v["command"] = canvas.yview
+
+        # Button for saving the image
+        save_button = ttk.Button(
+            command = self.save,
+            text = "Save decoded image",
+            padding = 1,
+        )
         
         # Convert the image array to a format that Tkinter understands
         my_image = PhotoImage(
@@ -1091,6 +1099,11 @@ class JpegDecoder():
             before = canvas,
         )
 
+        # Add the save button to the window
+        save_button.pack(
+            side = tk.TOP,
+        )
+
         # Open the window
         # from skimage import io
         # io.imsave("Teste 2.bmp", np.swapaxes(self.image_array, 0, 1))
@@ -1108,6 +1121,41 @@ class JpegDecoder():
         
         img = np.swapaxes(self.image_array, 0, 1)
         Image.fromarray(img).show()
+    
+    def save(self) -> None:
+        """Open a file dialog to save the image array as an image to the disk.
+        """
+        from PIL import Image
+        from tkinter.filedialog import asksaveasfilename
+        
+        # Open a file dialog for the user to provide a path
+        img_path = Path(
+            asksaveasfilename(
+                defaultextension = "png",
+                title = "Save decoded image as...",
+                filetypes = (
+                    ("PNG image", "*.png"),
+                    ("Bitmap image", "*.bmp"),
+                    ("All files", "*.*")
+                )
+            )
+        )
+        
+        # Make sure that the saved image does not overwrite an existing file
+        count = 1
+        my_stem = img_path.stem
+        while img_path.exists():
+            img_path = img_path.with_stem(f"{my_stem} ({count})")
+            count += 1
+        
+        # Convert the image array to a PIL object
+        my_image = Image.fromarray(np.swapaxes(self.image_array, 0, 1))
+
+        # Save the image to disk
+        try:
+            my_image.save(img_path)
+        except ValueError:
+            my_image.save(img_path.with_suffix("png"), format="png")
 
 
 class InverseDCT():
