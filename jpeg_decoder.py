@@ -1102,11 +1102,10 @@ class JpegDecoder():
         # Add the save button to the window
         save_button.pack(
             side = tk.TOP,
+            before = canvas,
         )
 
         # Open the window
-        # from skimage import io
-        # io.imsave("Teste 2.bmp", np.swapaxes(self.image_array, 0, 1))
         window.mainloop()
 
     def show2(self):
