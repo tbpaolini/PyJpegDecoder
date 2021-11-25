@@ -1315,9 +1315,64 @@ class UnsupportedJpeg(JpegError):
 # Run script
 
 if __name__ == "__main__":
-    # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago.jpg")
-    # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (4).jpg")
-    # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (3).jpg")
-    # jpeg = JpegDecoder(r"C:\Users\Tiago\OneDrive\Documentos\Python\Projetos\Steganography\Tiago (2).jpg")
-    # jpeg = JpegDecoder(r"C:\Users\Tiago\Pictures\ecce_homo_antonio_ciseri_1880.jpg")
-    pass
+    from sys import argv
+    try:
+        from tkinter.filedialog import askopenfilename
+        import tkinter as tk
+        dialog = True
+    except ModuleNotFoundError:
+        dialog = False
+
+    # Get the JPEG file path
+    while True:
+
+        # If a path was provided as a command line argument, then use it
+        if len(argv) > 1:
+            jpeg_path = Path(argv[1])
+        
+        # Open a dialog to ask the user for a image path
+        elif dialog:
+            window = tk.Tk()
+            window.state("withdrawn")
+            jpeg_path = Path(
+                askopenfilename(
+                    master = None,
+                    title = "Decode a JPEG image",
+                    filetypes = (
+                        ("JPEG images", "*.jpg *.jpeg *.jfif *.jpe *.jif *.jfi"),
+                        ("All files", "*.*")
+                    )
+                )
+            )
+            window.destroy()
+        
+        # If no GUI is available, then use the command prompt to ask the user for a path
+        else:
+            jpeg_path = Path(input("JPEG path: "))
+        
+        # Check if the provided path exists
+        if jpeg_path.exists():
+            break
+        
+        # Ask the user to try again if the path does not exist
+        else:
+            argv.clear()
+            print(f"'{jpeg_path.name}' was not found on '{jpeg_path.parent}'")
+            
+            # Ask yes or no
+            while True:
+                user_input = input("Try again with another file? [y]es / [n]o: ").lstrip().lower()[0]
+                if user_input in "yn":
+                    break
+            
+            # Break or continue the "get file path" loop
+            if user_input == "y":
+                continue
+            elif user_input == "n":
+                jpeg_path = None
+                break
+
+    
+    # Decode the image
+    if jpeg_path is not None:
+        JpegDecoder(jpeg_path)
