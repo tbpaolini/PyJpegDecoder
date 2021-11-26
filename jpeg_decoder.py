@@ -32,6 +32,7 @@ class JpegDecoder():
         with open(file, "rb") as image:
             self.raw_file = image.read()
         self.file_size = len(self.raw_file)     # Size (in bytes) of the file
+        self.file_path = file if isinstance(file, Path) else Path(file)
         
         # Check if file is a JPEG image
         # (The file needs to start with bytes 'FFD8FF')
@@ -1175,7 +1176,9 @@ class JpegDecoder():
                     ("PNG image", "*.png"),
                     ("Bitmap image", "*.bmp"),
                     ("All files", "*.*")
-                )
+                ),
+                initialfile = self.file_path.stem,
+                initialdir = self.file_path.parent,
             )
         )
         
