@@ -26,7 +26,7 @@ HuffmanTable = namedtuple("HuffmanTable", "dc ac")
 
 class JpegDecoder():
 
-    def __init__(self, file) -> None:
+    def __init__(self, file:Path) -> None:
 
         # Open file
         with open(file, "rb") as image:
@@ -37,6 +37,7 @@ class JpegDecoder():
         # (The file needs to start with bytes 'FFD8FF')
         if not self.raw_file.startswith(SOI + b"\xFF"):
             raise NotJpeg("File is not a JPEG image.")
+        print(f"Reading file '{file.name}' ({self.file_size:,} bytes)")
 
         # Handlers for the markers
         self.handlers = {
@@ -59,7 +60,7 @@ class JpegDecoder():
         self.sample_shape = ()          # Size to upsample the subsampled color components
         self.huffman_tables = {}        # Hold all huffman tables
         self.quantization_tables = {}   # Hold all quantization tables
-        self.restart_interval = 0       # How many MCU's before each restart marker
+        self.restart_interval = 0       # How many MCUs before each restart marker
         self.image_array = None         # Store the color values for each pixel of the image
         self.scan_count = 0             # Counter for the performed scans
 
@@ -104,8 +105,10 @@ class JpegDecoder():
         mode = self.raw_file[self.file_header-4 : self.file_header-2]
         if mode == SOF0:
             self.scan_mode = "baseline_dct"
+            print("Scan mode: Sequential")
         elif mode == SOF2:
             self.scan_mode = "progressive_dct"
+            print("Scan mode: Progressive")
         else:
             raise UnsupportedJpeg("Encoding mode not supported. Only 'Baseline DCT' and 'Progressive DCT' are supported.")
         
@@ -128,6 +131,7 @@ class JpegDecoder():
 
         self.image_width = bytes_to_uint(data[data_header : data_header+2])
         data_header += 2
+        print(f"Image dimensions: {self.image_width} x {self.image_height}")
 
         if self.image_width == 0:
             raise CorruptedJpeg("Image width cannot be zero.")
@@ -140,6 +144,11 @@ class JpegDecoder():
             else:
                 raise UnsupportedJpeg("Unsupported color space. Only RGB and greyscale are supported.")
         data_header += 1
+
+        if components_amount == 3:
+            print("Color space: YCbCr")
+        else:
+            print("Color space: greyscale")
 
         # Get the color components and their parameters
         components = (
@@ -168,10 +177,10 @@ class JpegDecoder():
 
                 # Group the parameters of the component
                 my_component = ColorComponent(
-                    name = component,                                       # Name of the color component
+                    name = component,                                    # Name of the color component
                     order = count-1,                                        # Order in which the component will come in the image
                     horizontal_sampling = horizontal_sample,                # Amount of pixels sampled in the horizontal
-                    vertical_sampling = vertical_sample,                    # # Amount of pixels sampled in the vertical
+                    vertical_sampling = vertical_sample,                    # Amount of pixels sampled in the vertical
                     quantization_table_id = my_quantization_table,          # Quantization table selector
                     repeat = horizontal_sample * vertical_sample,           # Amount of times the component repeats during decoding
                     shape = (8*horizontal_sample, 8*vertical_sample),       # Dimensions (in pixels) of the MCU for the component
@@ -192,6 +201,10 @@ class JpegDecoder():
         sample_width = max(component.shape[0] for component in self.color_components.values())
         sample_height = max(component.shape[1] for component in self.color_components.values())
         self.sample_shape = (sample_width, sample_height)
+
+        # Display the samplings
+        print(f"Horizontal sampling: {' x '.join(str(component.horizontal_sampling) for component in self.color_components.values())}")
+        print(f"Vertical sampling  : {' x '.join(str(component.vertical_sampling) for component in self.color_components.values())}")
         
         # Move the file header to the end of the data segment
         self.file_header += data_size
@@ -240,6 +253,8 @@ class JpegDecoder():
             
             # Add tree to the Huffman table dictionary
             self.huffman_tables.update({table_destination: huffman_tree})
+            print(f"Parsed Huffman table - ", end="")
+            print(f"ID: {table_destination & 0x0F} ({'DC' if table_destination >> 4 == 0 else 'AC'})")
 
         # Move the file header to the end of the data segment
         self.file_header += data_size
@@ -263,6 +278,7 @@ class JpegDecoder():
 
             # Add the table to the quantization tables dictionary
             self.quantization_tables.update({table_destination: quantization_table})
+            print(f"Parsed quantization table - ID: {table_destination}")
         
         # Move the file header to the end of the data segment
         self.file_header += data_size
@@ -270,6 +286,7 @@ class JpegDecoder():
     def define_restart_interval(self, data:bytes) -> None:
         self.restart_interval = bytes_to_uint(data[:2])
         self.file_header += 2
+        print(f"Restart interval: {self.restart_interval}")
 
     def start_of_scan(self, data:bytes) -> None:
         data_size = len(data)
@@ -346,7 +363,7 @@ class JpegDecoder():
         components in the scan).
         """
 
-        # Amount of MCU's in the whole image (horizontal, vertical, and total)
+        # Amount of MCUs in the whole image (horizontal, vertical, and total)
         if components_amount > 1:
             self.mcu_count_h = (self.image_width // self.mcu_width) + (0 if self.image_width % self.mcu_width == 0 else 1)
             self.mcu_count_v = (self.image_height // self.mcu_height) + (0 if self.image_height % self.mcu_height == 0 else 1)
@@ -375,6 +392,7 @@ class JpegDecoder():
         # Setup scan counter
         if self.scan_count == 0:
             self.scan_amount = self.raw_file[self.file_header:].count(SOS) + 1
+            print(f"Number of scans: {self.scan_amount}")
 
         # Begin the scan of the entropy encoded segment
         if self.scan_mode == "baseline_dct":
@@ -434,6 +452,11 @@ class JpegDecoder():
         The file header should be at the beginning of said segment, and at
         the after the decoding the header will be moved to the end of the segment.
         """
+        print(f"\nScan {self.scan_count+1} of {self.scan_amount}")
+        print(f"Color components: {', '.join(component.name for component in my_color_components.values())}")
+        print(f"MCU count: {self.mcu_count}")
+        print(f"Decoding MCUs and performing IDCT...")
+
         # Function to read the bits from the file's bytes
         next_bits = self.bits_generator()
 
@@ -445,7 +468,7 @@ class JpegDecoder():
             while huffman_value is None:
                 codeword += next_bits()
                 if len(codeword) > 16:
-                    raise CorruptedJpeg(f"Failed to decode image ({current_mcu}/{self.mcu_count} MCU's decoded).")
+                    raise CorruptedJpeg(f"Failed to decode image ({current_mcu}/{self.mcu_count} MCUs decoded).")
                 huffman_value = huffman_table.get(codeword)
             
             return huffman_value
@@ -459,7 +482,7 @@ class JpegDecoder():
         # Number of color components in the scan
         components_amount = len(my_color_components)
         
-        # Decode all the MCU's in the entropy encoded data
+        # Decode all MCUs in the entropy encoded data
         current_mcu = 0
         previous_dc = np.zeros(components_amount, dtype="int16")
         while (current_mcu < self.mcu_count):
@@ -568,7 +591,7 @@ class JpegDecoder():
             
             # Go to the next MCU
             current_mcu += 1
-            print(f"{current_mcu}/{self.mcu_count}", end="\r")
+            print_progress(current_mcu, self.mcu_count)
             
             # Check for restart interval
             if (self.restart_interval > 0) and (current_mcu % self.restart_interval == 0) and (current_mcu != self.mcu_count):
@@ -578,6 +601,8 @@ class JpegDecoder():
             When the Restart Interval is reached, the previous DC values are reseted to zero
             and the file header is moved to the byte boundary after the marker.
             """
+        self.scan_count += 1
+        print_progress(current_mcu, self.mcu_count, done=True)
 
     def progressive_dct_scan(self,
         huffman_tables_id:dict,
@@ -611,7 +636,12 @@ class JpegDecoder():
         The following scans of the same value send the next bits, in order, one bit per scan.
         Those scans are called "refining scans".
         """
-        print(f"\n-----\nCC: {', '.join(component.name for component in my_color_components.values())}\nSS: {spectral_selection_start}-{spectral_selection_end}\nSA: {bit_position_high}-{bit_position_low}")
+        print(f"\nScan {self.scan_count+1} of {self.scan_amount}")
+        print(f"Color components: {', '.join(component.name for component in my_color_components.values())}")
+        print(f"Spectral selection: {spectral_selection_start}-{spectral_selection_end} ({values.upper()})")
+        print(f"Successive approximation: {bit_position_high}-{bit_position_low} ({'refining' if refining else 'first'} scan)")
+        print(f"MCU count: {self.mcu_count}")
+        print(f"Decoding MCUs...")
 
         # Function to read the bits from the file's bytes
         next_bits = self.bits_generator()
@@ -624,7 +654,7 @@ class JpegDecoder():
             while huffman_value is None:
                 codeword += next_bits()
                 if len(codeword) > 16:
-                    raise CorruptedJpeg(f"Failed to decode image ({current_mcu}/{self.mcu_count} MCU's decoded).")
+                    raise CorruptedJpeg(f"Failed to decode image ({current_mcu}/{self.mcu_count} MCUs decoded).")
                 huffman_value = huffman_table.get(codeword)
             
             return huffman_value
@@ -705,7 +735,7 @@ class JpegDecoder():
                 
                 # Go to the next MCU
                 current_mcu += 1
-                print(f"{current_mcu}/{self.mcu_count}", end="\r")
+                print_progress(current_mcu, self.mcu_count)
                 
                 # Check for restart interval
                 if (self.restart_interval > 0) and (current_mcu % self.restart_interval == 0) and (current_mcu != self.mcu_count):
@@ -948,7 +978,7 @@ class JpegDecoder():
                     to refine them. One bit per value, in the same order the values were found.
                     """
                 
-                print(f"{current_mcu}/{self.mcu_count}", end="\r")
+                print_progress(current_mcu, self.mcu_count)
 
                  # Check for restart interval
                 if (self.restart_interval > 0) and (current_mcu % self.restart_interval == 0) and (current_mcu != self.mcu_count):
@@ -957,6 +987,8 @@ class JpegDecoder():
                     When a restart interval is reashed, then the decoder moves to the next byte
                     boundary (if not already at one), and then jumps over the restart marker (2 bytes long).
                     """
+        
+        print_progress(current_mcu, self.mcu_count, done=True)
         
         # Check if all scans have been performed and perform the IDCT
         self.scan_count += 1
@@ -970,6 +1002,7 @@ class JpegDecoder():
             
             # Perform the IDCT once all scans have finished
             dct_array = self.image_array.copy()
+            print("\nPerforming IDCT on each color component...")
             for component in self.color_components.values():
                 quantization_table = self.quantization_tables[component.quantization_table_id]
 
@@ -983,7 +1016,6 @@ class JpegDecoder():
                 mcu_count = mcu_count_h * mcu_count_v
 
                 # Perform the inverse discrete cosine transform (IDCT)
-                print()
                 for current_mcu in range(mcu_count):
                     
                     # Get coordinates of the block
@@ -1009,8 +1041,9 @@ class JpegDecoder():
                     
                     self.image_array[x1 : x2, y1 : y2, component.order] = block
 
-                    print(f"IDCT: {current_mcu+1}/{mcu_count}", end="\r")
-                print()
+                    print_progress(current_mcu+1, mcu_count, header=component.name.ljust(2))
+                
+                print_progress(current_mcu+1, mcu_count, header=component.name.ljust(2), done=True)
 
     def end_of_image(self, data:bytes) -> None:
         
@@ -1043,8 +1076,14 @@ class JpegDecoder():
         except ModuleNotFoundError:
             self.show2()
             return
-        from PIL import Image
-        from PIL.ImageTk import PhotoImage
+        try:
+            from PIL import Image
+            from PIL.ImageTk import PhotoImage
+        except ModuleNotFoundError:
+            print("The Pillow module needs to be installed in order to display the rendered image.")
+            print("For installing: https://pillow.readthedocs.io/en/stable/installation.html")
+
+        print("\nRendering the decoded image...")
 
         # Create the window
         window = tk.Tk()
@@ -1115,7 +1154,7 @@ class JpegDecoder():
             from PIL import Image
         except ModuleNotFoundError:
             print("The Pillow module needs to be installed in order to display the rendered image.")
-            print("For more info: https://pillow.readthedocs.io/en/stable/installation.html")
+            print("For installing it: https://pillow.readthedocs.io/en/stable/installation.html")
             return
         
         img = np.swapaxes(self.image_array, 0, 1)
@@ -1161,6 +1200,8 @@ class JpegDecoder():
                 img_path = img_path.with_stem(f"{my_stem} ({count})")
                 count += 1
             my_image.save(img_path, format="png")
+        
+        print(f"Decoded image was saved to '{img_path}'")
 
 
 class InverseDCT():
@@ -1286,6 +1327,7 @@ def YCbCr_to_RGB(image_array:np.ndarray) -> np.ndarray:
     space, and returns an array of the image in the RGB color space:
     array(width, heigth, YCbCr) -> array(width, heigth, RGB)
     """
+    print("\nConverting colors from YCbCr to RGB...")
     Y = image_array[..., 0].astype("float64")
     Cb = image_array[..., 1].astype("float64")
     Cr = image_array[..., 2].astype("float64")
@@ -1298,6 +1340,15 @@ def YCbCr_to_RGB(image_array:np.ndarray) -> np.ndarray:
     np.clip(output, a_min=0.0, a_max=255.0, out=output)
 
     return np.round(output).astype("uint8")
+
+def print_progress(current:int, total:int, done:bool=False, header:str="Progress") -> None:
+    """Print a progress percentage on the screen. If the process is not done yet,
+    the line is updated instead of moving to the next line.
+    """
+    if not done:
+        print(f"{header}: {current}/{total} ({current * 100 / total:.2f}%)", end="\r")
+    else:
+        print(f"{header}: {current}/{total} ({current * 100 / total:.0f}%) DONE!")
 
 # ----------------------------------------------------------------------------
 # Decoder exceptions
@@ -1385,3 +1436,4 @@ if __name__ == "__main__":
     # Decode the image
     if jpeg_path is not None:
         JpegDecoder(jpeg_path)
+    print("Program finished. Have a nice day!")
