@@ -1394,6 +1394,7 @@ if __name__ == "__main__":
             if dialog:
                 window = tk.Tk()
                 window.state("withdrawn")
+                print("Please choose a JPEG image...")
                 jpeg_path = Path(
                     askopenfilename(
                         master = None,
