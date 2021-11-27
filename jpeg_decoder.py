@@ -1088,7 +1088,7 @@ class JpegDecoder():
 
         # Create the window
         window = tk.Tk()
-        window.title("Decoded JPEG")
+        window.title(f"Decoded JPEG: {self.file_path.name}")
         try:
             window.state("zoomed")
         except tk.TclError:
@@ -1181,6 +1181,10 @@ class JpegDecoder():
                 initialdir = self.file_path.parent,
             )
         )
+
+        # If the user has canceled, then exit the function
+        if img_path == Path():
+            return
         
         # Make sure that the saved image does not overwrite an existing file
         count = 1
@@ -1409,6 +1413,13 @@ if __name__ == "__main__":
                     )
                 )
                 window.destroy()
+                
+                # Check if the user has chosen something
+                # (if the window was closed, then it returns an empty path)
+                if jpeg_path == Path():
+                    print("No file was selected.")
+                    jpeg_path = None
+                    break
             
             # If no GUI is available, then use the command prompt to ask the user for a path
             else:
