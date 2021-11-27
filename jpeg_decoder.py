@@ -99,10 +99,35 @@ class JpegDecoder():
                 self.file_header += 1
 
     def start_of_frame(self, data:bytes) -> None:
+        """Parse the information on the Start of Frame segment: scan mode,
+        image dimensions, color space, sampling, quantization tables used."""
+
         data_size = len(data)
         data_header = 0
+
+        """NOTE
+        The byte structure of the segment (in order):
+            - 2 bytes: length of the segment
+            - 1 byte: sample precision
+            - 1 byte: image height
+            - 1 byte: image width
+            - 1 byte: amount of color components
+            
+            - For each color component:
+                - 1 byte: ID of the component
+                - 4 bits: horizontal sample
+                - 4 bits: vertical sample
+                - 1 byte: ID of the quantization table used on the component
+        
+        If there are 3 color components, the image is considered to be in the YCbCr
+        color space. The first component of the segment is Y, the next Cb, and the
+        last is Cr.
+        
+        If there is a single component, then the image is considered to be greyscale.
+        """
         
         # Check encoding mode
+        # (the marker used for the segment determines the scan mode)
         mode = self.raw_file[self.file_header-4 : self.file_header-2]
         if mode == SOF0:
             self.scan_mode = "baseline_dct"
@@ -361,32 +386,32 @@ class JpegDecoder():
 
         """NOTE
         The color values of a JPEG image are not stored directly, but rather as
-        a table of frequencies (DCT coeficients). The quantization table is used
-        to "cut" those coeficients deemed "unecessary" for how the human eye
+        a table of frequencies (DCT coefficients). The quantization table is used
+        to "cut" those coefficients deemed "unecessary" for how the human eye
         will perceive the image.
 
         The quantization table is a 8 x 8 matrix. The quantization is the lossy
         step of the JPEG encoding. The image is broken in blocks of 8 x 8 pixels.
-        The DCT coeficients of the block are calculated, and then they are
+        The DCT coefficients of the block are calculated, and then they are
         divided element-wise by the quantization table. The results are rounded
         to the nearest integer.
 
-        The quantization essentially decreases the resolution of the coeficients.
+        The quantization essentially decreases the resolution of the coefficients.
         It assumes that the human eye cannot perceive quick variation of details
-        within a small area. The coeficients closer to the top left have a bigger
+        within a small area. The coefficients closer to the top left have a bigger
         imact on how the eye will perceive the image, because they represent
         smaller frequencies of details (smaller frequency means larger wavelength),
         which the eye should perceive them better.
         
-        It is worth noting that the smaller DCT coeficients are going to become 0.
-        That will be the case of most, if not all, of the coeficients of the lower
+        It is worth noting that the smaller DCT coefficients are going to become 0.
+        That will be the case of most, if not all, of the coefficients of the lower
         right section of the block. This large amount of repeated values make
         the data to be better compressed.
         
-        The smaller values of the other coeficients also aids in compression,
+        The smaller values of the other coefficients also aids in compression,
         because those values can be represented using less bits.
 
-        IMPORTANT: The 8 x 8 block of quantized coeficients are stored in zig-zag
+        IMPORTANT: The 8 x 8 block of quantized coefficients are stored in zig-zag
         order, starting from the top left. This makes the zero values to be mostly
         grouped together in the end of the sequence, which helps with compression.
         The sequence is (from 0 to 63):
@@ -425,16 +450,51 @@ class JpegDecoder():
             # Add the table to the quantization tables dictionary
             self.quantization_tables.update({table_destination: quantization_table})
             print(f"Parsed quantization table - ID: {table_destination}")
+
+            """NOTE
+            Each quantization table can come each in its own segment on the file.
+            Or all tables in the same segment, one imediately after the other,
+            following the same byte structure (ID, then the 64 values).
+            """
         
         # Move the file header to the end of the data segment
         self.file_header += data_size
 
     def define_restart_interval(self, data:bytes) -> None:
+        """Parse the restart interval value."""
         self.restart_interval = bytes_to_uint(data[:2])
         self.file_header += 2
         print(f"Restart interval: {self.restart_interval}")
+        
+        """NOTE
+        The JPEG standart allow to restart markers to be added to the encoded image data.
+        Those are meant to aid in error correction. The restart markers, when present,
+        are added each a certain amount of MCUs. This amount is specified in the
+        "Define Restart Interval" (DRI) segment, which starts after the 0xFFDD marker.
+
+        The restart markers are the bytes from 0xFFD0 to 0xFFD7. They are used sequentially,
+        and wrap back to 0xFFD0 after 0xFFD7.
+        
+        It is worth noting that the MCUs encoded on the data stream are not necessarily
+        aligned to the byte boundary (8-bits). So after reaching the amount of MCUs specified
+        on the restart interval, it is necessary to move the bits header to the begining of
+        the next byte, by taking the modulo of the position,if the header isn't already there:
+            
+            if (header_position % 8) != 0:
+                header_position += 8 - (header_position % 8)
+            header_position += 16
+        
+        We also need to jump the marker itself, which is 16-bits long. So we also added 16
+        to the header position.
+
+        It is worth noting that the restart interval can be defined again after a scan.
+        The latest defined value is what counts for each scan.
+        """
 
     def start_of_scan(self, data:bytes) -> None:
+        """Parse the information necessary to decode a segment of encoded image data,
+        then passes this information to the method that handles the scan mode used."""
+        
         data_size = len(data)
         data_header = 0
 
@@ -493,6 +553,13 @@ class JpegDecoder():
                 raise CorruptedJpeg("Image height cannot be zero.")
 
         # Dimensions of the MCU (minimum coding unit)
+        """NOTE
+        If there is only one color component in the scan, then the MCU size is always 8 x 8.
+
+        If there is more than one color component, the MCU size is determined by the component
+        with the highest resolution (considering all the components of the image, not only the
+        components in the scan).
+        """
         if components_amount > 1:
             self.mcu_width:int = 8 * max(component.horizontal_sampling for component in self.color_components.values())
             self.mcu_height:int = 8 * max(component.vertical_sampling for component in self.color_components.values())
@@ -501,15 +568,16 @@ class JpegDecoder():
             self.mcu_width:int = 8
             self.mcu_height:int = 8
             self.mcu_shape = (8, 8)
-        """NOTE
-        If there is only one color component in the scan, then the MCU size is always 8 x 8.
-
-        If there is more than one color component, the MCU size is determined by the component
-        with the highest resolution (considering all the components of the image, not only the
-        components in the scan).
-        """
 
         # Amount of MCUs in the whole image (horizontal, vertical, and total)
+        """NOTE
+        If the image dimensions are not multiples of the MCU dimensions, then
+        then the image right and bottom borders are padded with enough pixels
+        to fit a full MCU (normally by just repeating the pixels on the borders).
+        
+        A JPEG decoder will just disregard those padding pixels when rendering
+        the image.
+        """
         if components_amount > 1:
             self.mcu_count_h = (self.image_width // self.mcu_width) + (0 if self.image_width % self.mcu_width == 0 else 1)
             self.mcu_count_v = (self.image_height // self.mcu_height) + (0 if self.image_height % self.mcu_height == 0 else 1)
@@ -579,6 +647,12 @@ class JpegDecoder():
                 
                 if next_byte == 0xFF:
                     self.file_header += 1        # Jump over the stuffed byte
+                    """NOTE
+                    In order to prevent a sequence to be mistaken for a marker, when a 0xFF byte
+                    appears on the image data, the encoder adds a 0x00 afterwards. This is called
+                    'byte stuffing', and it is up to the decoder to remove it before decoding the
+                    stream.
+                    """
                 
                 bit_queue.extend(
                     np.unpackbits(
@@ -632,6 +706,38 @@ class JpegDecoder():
         current_mcu = 0
         previous_dc = np.zeros(components_amount, dtype="int16")
         while (current_mcu < self.mcu_count):
+            """NOTE
+            The decoding process goes through all MCUs in the image.
+
+            The MCUs are encoded sequentially on the stream, starting from the top
+            left of the image, then going left-to-right and then top-to-bottom.
+            Each MCU has 64 elements, the first being the DC value and the other 63
+            being the AC values.
+
+            If the image is greyscale, the color values are sequential: you get the
+            64 values of the Luminance MCU, and then move to the next MCU.
+
+            If the image is colored, the color values are interleaved: first you get
+            the values of the Luminance MCU, followed by the values of the Blue 
+            Chrominance MCU, and then the values of the Red Chrominance MCU. Both
+            Red and Blue chrominances share the same Huffman trees.
+
+            However the amount of values that each MCU has depend on the chroma subsampling.
+            The subsampling is made by taking a number adjascent pixels, then averaging
+            their chromaminance values, and treating the result as a single pixel.
+            So each 8x8 block of chrominance values end up representing an area larger
+            than 8x8 pixels.
+            
+            In order to compensate for that, when decoding the data stream, you first get
+            (consecutively) a number of 8x8 blocks of luminance values enough to
+            cover the area of the chrominance blocks. And only after those luminance blocks
+            you get one 8x8 blue chrominance block, and then one 8x8 red chrominance block.
+            And then the whole process repeats until all the data is scanned.
+
+            The area covered by the 8x8 luminance blocks starts from the top left, then
+            goes from left to right, and finally from top to bottom. This area starts
+            from the top left of the image, and also follows left to right and top to bottom.
+            """
             
             # (x, y) coordinates, on the image, for the current MCU
             mcu_y, mcu_x = divmod(current_mcu, self.mcu_count_h)
@@ -1163,13 +1269,19 @@ class JpegDecoder():
             dct_array = self.image_array.copy()
             print("\nPerforming IDCT on each color component...")
             for component in self.color_components.values():
+
+                # Quantization table used by the component
                 quantization_table = self.quantization_tables[component.quantization_table_id]
 
+                # Subsampling ratio
                 ratio_h = self.sample_shape[0] // component.shape[0]
                 ratio_v = self.sample_shape[1] // component.shape[1]
+
+                # Dimensions of the MCU of the component
                 component_width = self.array_width // ratio_h
                 component_height = self.array_height // ratio_v
 
+                # Amount of MCUs
                 mcu_count_h = component_width // 8
                 mcu_count_v = component_height // 8
                 mcu_count = mcu_count_h * mcu_count_v
@@ -1198,6 +1310,7 @@ class JpegDecoder():
                         x2 *= ratio_h
                         y2 *= ratio_v
                     
+                    # Store the color values of the image array
                     self.image_array[x1 : x2, y1 : y2, component.order] = block
 
                     print_progress(current_mcu+1, mcu_count, header=component.name.ljust(2))
@@ -1205,6 +1318,8 @@ class JpegDecoder():
                 print_progress(current_mcu+1, mcu_count, header=component.name.ljust(2), done=True)
 
     def end_of_image(self, data:bytes) -> None:
+        """Method called when the 'end of image' marker is reached.
+        The file parsing is finished, the image is converted to RGB and displayed."""
         
         # Clip the image array to the image dimensions
         self.image_array = self.image_array[0 : self.image_width, 0 : self.image_height, :]
@@ -1370,17 +1485,30 @@ class JpegDecoder():
 
 
 class InverseDCT():
+    """Perform the inverse cosine discrete transform (IDCT) on a 8 x 8 matrix of DCT coefficients.
+    """
+    
     # Precalculate the constant values used on the IDCT function
+    # (those values are cached, being calculated only the first time a instance of the class is created)
     idct_table = np.zeros(shape=(8,8,8,8), dtype="float64")
-    xyuv_coordinates = tuple(product(range(8), repeat=4))
-    xy_coordinates = tuple(product(range(8), repeat=2))
+    xyuv_coordinates = tuple(product(range(8), repeat=4))   # All 4096 combinations of 4 values from 0 to 7 (each)
+    xy_coordinates = tuple(product(range(8), repeat=2))     # All 64 combinations of 2 values from 0 to 7 (each)
     for x, y, u, v in xyuv_coordinates:
+        """NOTE
+        xyuv_coordinates are all the combinations of 4 values, ea
+        """
         # Scaling factors
         Cu = 2**(-0.5) if u == 0 else 1.0   # Horizontal
         Cv = 2**(-0.5) if v == 0 else 1.0   # Vertical 
 
         # Frequency component
         idct_table[x, y, u, v] = 0.25 * Cu * Cv * cos((2*x + 1) * pi * u / 16) * cos((2*y + 1) * pi * v / 16)
+
+    """NOTE
+    For an in-depth explanation on how the transform works, please refer to chapter 7 of this book:
+    https://research-solution.com/uplode/book/book-26184.pdf
+    Compressed Image File Formats, John Miano
+    """
 
     def __call__(self, block:np.ndarray) -> np.ndarray:
         """Takes a 8 x 8 array of DCT coefficients, and performs the inverse discrete
@@ -1402,6 +1530,10 @@ class InverseDCT():
         """
 
 class ResizeGrid():
+    """Resize a grid of color values, performing linear interpolation between of those values.
+    """
+
+    # Cache the meshes used for the interpolation
     mesh_cache = {}
     indices_cache = {}
 
@@ -1409,12 +1541,16 @@ class ResizeGrid():
         """Takes a 2-dimensional array and resizes it while performing
         linear interpolation between the points.
         """
+
+        # Ratio of the resize
         old_width, old_height = block.shape
         new_width, new_height = new_shape
         key = ((old_width, old_height), (new_width, new_height))
 
+        # Get the interpolation mesh from the cache
         new_xy = self.mesh_cache.get(key)
         if new_xy is None:
+            # If the cache misses, then calculate and cache the mesh
             max_x = old_width - 1
             max_y = old_height - 1
             num_points_x = new_width * 1j
@@ -1422,14 +1558,21 @@ class ResizeGrid():
             new_x, new_y = np.mgrid[0 : max_x : num_points_x, 0 : max_y : num_points_y]
             new_xy = (new_x, new_y)
             self.mesh_cache.update({key: new_xy})
+            """NOTE
+            The mesh has the same shape as the resized grid.
+            The mesh contains the indices of the original grid, but interpolated to the new shape.
+            """
         
+        # Get, from the cache, the indices of the values on the original grid
         old_xy = self.indices_cache.get(key[0])
         if old_xy is None:
+            # If the cache misses, calculate and cache the indices
             xx, yy = np.indices(block.shape)
             xx, yy = xx.flatten(), yy.flatten()
             old_xy = (xx, yy)
             self.indices_cache.update({key[0]: old_xy})
         
+        # Resize the grid and perform linear interpolation
         resized_block = griddata(old_xy, block.ravel(), new_xy)
         
         return np.round(resized_block).astype(block.dtype)
@@ -1439,9 +1582,11 @@ class ResizeGrid():
 # Helper functions
 
 def bytes_to_uint(bytes_obj:bytes) -> int:
+    """Convert a big-endian sequence of bytes to an unsigned integer."""
     return int.from_bytes(bytes_obj, byteorder="big", signed=False)
 
 def bin_twos_complement(bits:str) -> int:
+    """Convert a binary number to a signed integer using the two's complement."""
     if bits == "":
         return 0
     elif bits[0] == "1":
