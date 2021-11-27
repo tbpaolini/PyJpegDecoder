@@ -178,7 +178,7 @@ class JpegDecoder():
 
                 # Group the parameters of the component
                 my_component = ColorComponent(
-                    name = component,                                    # Name of the color component
+                    name = component,                                       # Name of the color component
                     order = count-1,                                        # Order in which the component will come in the image
                     horizontal_sampling = horizontal_sample,                # Amount of pixels sampled in the horizontal
                     vertical_sampling = vertical_sample,                    # Amount of pixels sampled in the vertical
@@ -211,15 +211,61 @@ class JpegDecoder():
         self.file_header += data_size
 
     def define_huffman_table(self, data:bytes) -> None:
+        """Parse the Huffman tables from the file.
+        """
         data_size = len(data)
         data_header = 0
+
+        """NOTE
+        The Huffman tables are used to compress and decompress the image data.
+        For an explanantion of how they work in general:
+        https://www.youtube.com/watch?v=NjhJJYHpYsg
+
+        A JPEG image has up to 4 of Huffman tables: 2 for luminance and 2 for chrominance.
+
+        In the context of a JPEG image, these are the very basics of where those tables come from:
+        - When an image is encoded to JPEG, it is divided in blocks of 8x8 pixels.
+        - The luminance and chrominance values of those pixels are stored on an 8x8 matrix,
+        for each block.
+        - The top left value of each matrix is called DC, and all other values AC.
+        - When compressing the values, all the DC values are grouped and compressed
+        separately from the AC values.
+        - So the 4 tables refer to:
+            - Luminance DC
+            - Luminance AC
+            - Chrominance DC
+            - Chrominance AC
+        
+        Here is a more in-depth explanation:
+        https://www.impulseadventure.com/photo/jpeg-huffman-coding.html
+
+        In progressive JPEG, a Huffman table might be overwritten by a new one after
+        a scan. Thus allowing the encoder to create tables that are optimized for the
+        next scan.
+        """
         
         # Get all huffman tables on the data
+        """NOTE
+        Each Huffman table begins with the 0xFFC4 marker, followed by two bytes that
+        indicate the lenght (in bytes) of the section, and then 1 byte to indicate
+        the destination that the table refers to.
+
+        The lower nibble of the destination is the ID of the table, and the upper
+        nibble is if the table is for DC values (0x0) or AC values  (0x1).
+        """
+
         while (data_header < data_size):
             table_destination = data[data_header]
             data_header += 1
 
             # Count how many codes of each length there are
+            """NOTE
+            Then the next 16 bytes following the destination indicate the bit lenghts
+            of the elements stored on the table: first byte of this sequence is the amount
+            of elements that are 1 bit long, second byte the amount of elements 2 bits long,
+            and so on.
+            """
+
             codes_count = {
                 bit_length: count
                 for bit_length, count
@@ -228,6 +274,11 @@ class JpegDecoder():
             data_header += 16
 
             # Get the Huffman values (HUFFVAL)
+            """NOTE
+            The bytes following the lengths are the values themselves in order of
+            increasing bit-length.
+            """
+
             huffval_dict = {}   # Dictionary that associates each code bit-length to all its respective Huffman values
 
             for bit_length, count in codes_count.items():
@@ -242,6 +293,40 @@ class JpegDecoder():
                 raise CorruptedJpeg("Failed to parse Huffman tables.")
             
             # Build the Huffman tree
+            """NOTE
+            A Huffman tree starts from a root node (depth 0), and each node has two
+            nodes bellow it (depths 1, 2, 3, ...). On a JPEG file, the tree goes up
+            to depth 16.
+
+            The tree contains elements that appear on the original data (before
+            compression). Elements are assigned to some nodes in a way that the most
+            common elements take shorter to navigate to than the least common. The
+            path used to navigate throug the tree is the codeword that is stored
+            pn the compressed data
+
+            To navigate through the tree: starting from the root node, if you go to
+            the left node you append the value of 0 to the codeword, and if you go
+            right you append the value of 1. When you get to a non-empty node you
+            stop, the value contained on the node is the value that the codeword
+            represents. The amount of steps you took to get to the element is the
+            bit-length of the codeword.
+
+            The JPEG file stores the amount of elements of each bit-length, which
+            we have already extracted to self.huffman_tables. In order to build the
+            tree from this data:
+                1. Starting from the root node (depth 0), add two empty nodes (depth 1).
+                2. Depth 1: the empty nodes are filled from left to right with the
+                elements bit-length 1.
+                3. To the remaing empty nodes (depth 1) add 2 nodes to each (creating
+                depth 2)
+                4. Steps 2 and 3 are repeated, with depth N being filled with elements
+                of bit-depth N.
+                5. The process stops when all elements are used
+            
+            Our Huffman tree will be stored in a Python dictionary. It associates the
+            codeword (as a string containg only '0' and '1') with its respective value.
+            """
+
             huffman_tree = {}
 
             code = 0
@@ -257,17 +342,77 @@ class JpegDecoder():
             print(f"Parsed Huffman table - ", end="")
             print(f"ID: {table_destination & 0x0F} ({'DC' if table_destination >> 4 == 0 else 'AC'})")
 
+            """NOTE
+            Depending on the encoder, all the Huffman tables might be in the same
+            segment of the file, or each table can be in its own segment.
+            If the tables are in the same segment, then the bytes of the next table
+            immediatelly follows the bytes of the previous one. The order remains
+            the same: destination, lengths, values.
+            """
+
         # Move the file header to the end of the data segment
         self.file_header += data_size
 
     def define_quantization_table(self, data:bytes) -> None:
+        """Parse the quantization table from the file.
+        """
         data_size = len(data)
         data_header = 0
+
+        """NOTE
+        The color values of a JPEG image are not stored directly, but rather as
+        a table of frequencies (DCT coeficients). The quantization table is used
+        to "cut" those coeficients deemed "unecessary" for how the human eye
+        will perceive the image.
+
+        The quantization table is a 8 x 8 matrix. The quantization is the lossy
+        step of the JPEG encoding. The image is broken in blocks of 8 x 8 pixels.
+        The DCT coeficients of the block are calculated, and then they are
+        divided element-wise by the quantization table. The results are rounded
+        to the nearest integer.
+
+        The quantization essentially decreases the resolution of the coeficients.
+        It assumes that the human eye cannot perceive quick variation of details
+        within a small area. The coeficients closer to the top left have a bigger
+        imact on how the eye will perceive the image, because they represent
+        smaller frequencies of details (smaller frequency means larger wavelength),
+        which the eye should perceive them better.
+        
+        It is worth noting that the smaller DCT coeficients are going to become 0.
+        That will be the case of most, if not all, of the coeficients of the lower
+        right section of the block. This large amount of repeated values make
+        the data to be better compressed.
+        
+        The smaller values of the other coeficients also aids in compression,
+        because those values can be represented using less bits.
+
+        IMPORTANT: The 8 x 8 block of quantized coeficients are stored in zig-zag
+        order, starting from the top left. This makes the zero values to be mostly
+        grouped together in the end of the sequence, which helps with compression.
+        The sequence is (from 0 to 63):
+
+            0	1	5	6	14	15	27	28
+            2	4	7	13	16	26	29	42
+            3	8	12	17	25	30	41	43
+            9	11	18	24	31	40	44	53
+            10	19	23	32	39	45	52	54
+            20	22	33	38	46	51	55	60
+            21	34	37	47	50	56	59	61
+            35	36	48	49	57	58	62	63
+
+        """
 
         # Get all quantization tables on the data
         while (data_header < data_size):
             table_destination = data[data_header]
             data_header += 1
+
+            """NOTE
+            The quantization table segments on the file begin with the marker 0xFFDB.
+            The next two bytes represent the length of the segment. The next byte is
+            the ID of the table. And the 64 bytes afterwards are the 64 values of
+            the quantization table in zig-zag order.
+            """
 
             # Get the 64 values of the 8 x 8 quantization table
             qt_values = np.array([value for value in data[data_header : data_header+64]], dtype="int16")
@@ -508,6 +653,19 @@ class JpegDecoder():
                 When there is more than one color component in the scan, the components are
                 interleaved. And the component with the highest resolution is repeated enough
                 times to cover the area of the subsampled components.
+                
+                For example, if you subsampled the chrominance by 2 pixels in the vertical and
+                in the horizontal, then a 8 x 8 block of the chrominance layer actually covers
+                an area of 16 x 16 in the image. While the luminance blocks still cover an
+                area of 8 x 8. Four of those blocks are necessary to cover an area of 16 x 16,
+                
+                So in this case, while decoding we get 4 blocks of luminance followed by 1 block
+                of blue chrominance and then 1 block of red chrominance. All this set of blocks
+                is the MCU (Minimum Coding Unit).
+
+                The repeated blocks cover the MCU area starting from the top left, then moving
+                from left to right and from top to bottom. The MCUs themselves also cover the
+                image following the same pattern (left to right, then bottom to top).
                 """
                 
                 for block_count in range(repeat):
