@@ -71,6 +71,8 @@ class JpegDecoder():
         marker is found, control is passed to a method to handle it. The method
         then gives the control back to the main loop, which continues from where
         the method stopped.
+        Each marker begins with 0xFF. If this byte is followed by a 0x00, then
+        it is escaped.
         If the marker isn't recognized, then its data segment is just skipped.
         """
         while not self.scan_finished:
@@ -80,22 +82,31 @@ class JpegDecoder():
                 del self.raw_file
                 break
 
+            # Whether the current byte is 0xFF
             if (current_byte == 0xFF):
+
+                # Read the next byte
                 my_marker = self.raw_file[self.file_header : self.file_header+2]
                 self.file_header += 2
 
+                # Whether the two bytes form a marker (and isn't a restart marker)
                 if (my_marker != b"\xFF\x00") and (my_marker not in RST):
+
+                    # Attempt to get the handler for the marker
                     my_handler = self.handlers.get(my_marker)
                     my_size = bytes_to_uint(self.raw_file[self.file_header : self.file_header+2]) - 2
                     self.file_header += 2
 
                     if my_handler is not None:
+                        # If a handler was found, pass the control to it
                         my_data = self.raw_file[self.file_header : self.file_header+my_size]
                         my_handler(my_data)
                     else:
+                        # Otherwise, just skip the data segment
                         self.file_header += my_size
             
             else:
+                # Move to the next byte if the current byte is not 0xFF
                 self.file_header += 1
 
     def start_of_frame(self, data:bytes) -> None:
