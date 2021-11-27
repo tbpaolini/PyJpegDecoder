@@ -801,6 +801,14 @@ class JpegDecoder():
                     dc_value = bin_twos_complement(next_bits(huffman_value)) + previous_dc[depth]
                     previous_dc[depth] = dc_value
                     block[0] = dc_value
+                    """NOTE
+                    The DC value is delta encoded in relation to the previous DC value of the
+                    same color component.
+                    Delta encoding is the difference between two consecutive values. So the
+                    decoded value is just added to the previous DC value in order to find
+                    the current value.
+                    For the first DC value, the previous value is considered to be zero.
+                    """
 
                     # AC values of the block
                     table_id = huffman_tables_id[component_id].ac
@@ -991,6 +999,14 @@ class JpegDecoder():
                             # Get the DC value (partial)
                             dc_value = bin_twos_complement(next_bits(huffman_value)) + previous_dc[depth]
                             previous_dc[depth] = dc_value
+                            """NOTE
+                            The DC value is delta encoded in relation to the previous DC value of the
+                            same color component.
+                            Delta encoding is the difference between two consecutive values. So the
+                            decoded value is just added to the previous DC value in order to find
+                            the current value.
+                            For the first DC value, the previous value is considered to be zero.
+                            """
                             
                             # Store the partial DC value on the image array
                             self.image_array[x+delta_x, y+delta_y, component.order] = (dc_value << bit_position_low)
@@ -1018,6 +1034,10 @@ class JpegDecoder():
                     next_bits(amount=0, restart=True)
                     if not refining:
                         previous_dc[:] = 0
+                    """NOTE
+                    When the Restart Interval is reached, the previous DC values are reseted to zero
+                    and the file header is moved to the byte boundary after the marker.
+                    """
 
         # AC values scan
         elif values == "ac":
