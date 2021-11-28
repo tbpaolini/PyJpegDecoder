@@ -509,6 +509,23 @@ class JpegDecoder():
         data_size = len(data)
         data_header = 0
 
+        """NOTE
+        The structure of the Start of Scan header is (in order):
+            - 2 bytes: length of the segment
+            - 1 byte: amount of color components in the current scan
+            - For each color component in the scan:
+                - 1 byte: ID of the component
+                - 4 bits: ID of the Huffman table for DC values of the component
+                - 4 bits: ID of the Huffman table for AC values of the component
+            - 1 byte: Start of the spectral selection
+            - 1 byte: End of the spectral selection
+            - 4 bits: Successive approximation (high)
+            - 4 bits: Successive approximation (low)
+        
+        Note: Spectral selection and successive approximation are relevant for
+        the progressive scan. They have no meaning for baseline scan.
+        """
+
         # Number of color components in the scan
         components_amount = data[data_header]
         data_header += 1
