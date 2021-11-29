@@ -30,6 +30,6 @@ You can install all of them at once with the following shell command (if you alr
 pip3 install numpy scipy pillow
 ```
 
-You can [download Python here](https://www.python.org/downloads/). The decoder was made in Python 3.9.4, but it works in later versions (and it is assumed to also work on previous 3.x versions). Once everything is installed, just run the script `jpeg_decoder.py`. It will then ask to select a JPEG file, and it will do the rest of the job by itself while displaying the progress. Once finished, the decoded image will be displayed with an option to save a lossless version.
+You can [download Python here](https://www.python.org/downloads/). The decoder was made in Python 3.9.4, but it works in later versions (and it is assumed to also work on previous 3.x versions). Once everything is installed, just run the script `jpeg_decoder.py`. It will then ask to select a JPEG file, and it will do the rest of the job by itself while displaying the progress. Once finished, the decoded image will be displayed with an option to save it in a lossless format.
 
 I would like to reiterate that this decoder is for educational purposes, that is, to help people learning about how JPEG work. The decoder is not meant to be "performing" or "for production". That being considered, I still hope you find it helpful!
