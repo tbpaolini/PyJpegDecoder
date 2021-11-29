@@ -4,11 +4,11 @@ By: Tiago Becerra Paolini
 
 ## About
 
-This decoder supports both baseline (sequential) and progressive JPEG images. The decoder was made for the purpose of learning how JPEG images work, and I am making it available so it may help others to also learn about. The primary goal of this project is code readability, not performance (furthermore, one would not make a media decoder purely in an interpreted language). But some optimizations were made so it takes a reasonable amount of time to run.
+This decoder supports both baseline (sequential) and progressive JPEG images. The decoder was made for the purpose of learning how JPEG images work, and I am making it available so it may help others to also learn about. The primary goal of this project is code readability, not performance (furthermore, one would not make a media decoder purely in an interpreted language when performance is the objective). But some optimizations were made so it takes a reasonable amount of time to run.
 
 My motivation was that it was quite difficult to find online detailed explanations on how to actually implement JPEG in code, most of what I found were just general explanations of the concepts involved. Specially when it comes to progressive JPEG, most of what I found about were a description of ***what*** it accomplishes but not ***how*** it accomplishes. But I am glad that after a great deal of research and effort I managed to pull off the decoding of progressive JPEG images, not only the usual sequential images.
 
-I thoroughly commented my code to explain what is being accomplished is each step, so I encourage you to go through the source code, as Python is not difficult to read. I intend at some point to create a tutorial. But for the time being, I would like to point to the references that I used for the project, which explain in even greater detail how JPEG decoding works.
+I thoroughly commented my code to explain what is being accomplished is each step, so I encourage you to go through the [source code](https://github.com/tbpaolini/PyJpegDecoder/blob/master/jpeg_decoder.py), as Python is not difficult to read. I intend at some point to create a tutorial. But for the time being, I would like to point to the references that I used for the project, which explain in even greater detail how JPEG decoding works.
 
 ## References
 
@@ -21,8 +21,8 @@ I thoroughly commented my code to explain what is being accomplished is each ste
 ## Usage
 
 The decoder requires the following third party Python modules:
-* [Numpy](https://numpy.org/install/)
-* [Scipy](https://scipy.org/install/)
+* [NumPy](https://numpy.org/install/)
+* [SciPy](https://scipy.org/install/)
 * [Pillow](https://pillow.readthedocs.io/en/stable/installation.html) *(only for displaying the decoded image, the actual decoding process is still made by my decoder)*
 
 You can install all of them at once with the following shell command (if you already have Python installed):
@@ -30,4 +30,6 @@ You can install all of them at once with the following shell command (if you alr
 pip3 install numpy scipy pillow
 ```
 
-You can [download Python here](https://www.python.org/downloads/). The decoder was made in Python 3.9.4, but it works in later versions (and it is assumed to also work on previous 3.x versions).
+You can [download Python here](https://www.python.org/downloads/). The decoder was made in Python 3.9.4, but it works in later versions (and it is assumed to also work on previous 3.x versions). Once everything is installed, just run the script `jpeg_decoder.py`. It will then ask to select a JPEG file, and it will do the rest of the job by itself while displaying the progress. Once finished, the decoded image will be displayed with an option to save a lossless version.
+
+I would like to reiterate that this decoder is for educational purposes, that is, to help people learning about how JPEG work. The decoder is not meant to be "performing" or "for production". That being considered, I still hope you find it helpful!
